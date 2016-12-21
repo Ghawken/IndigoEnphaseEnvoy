@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<Actions>
+  <Action id="refreshData">
+    <Name>Refresh data for all devices...</Name>
+    <CallbackMethod>refreshDataAction</CallbackMethod>
+  </Action>
+
+  <Action id="refreshDataForDev" deviceFilter="self">
+    <Name>Refresh data for device...</Name>
+    <CallbackMethod>refreshDataForDevAction</CallbackMethod>
+  </Action>
+
+  
+</Actions>
+

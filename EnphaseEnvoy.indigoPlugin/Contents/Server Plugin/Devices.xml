@@ -1,0 +1,221 @@
+<?xml version="1.0"?>
+<Devices>
+
+  <Device type="custom" id="EnphaseEnvoyDevice">
+    <Name>Enphase Envoy-S</Name>
+
+    <ConfigUI>
+      <Field id="label3" type="label" fontColor="black">
+        <Label>Envoy IP Address:</Label>
+      </Field>      
+            <Field id="label4" type="label" fontSize="small" fontColor="black">
+        <Label></Label>
+      </Field>
+      
+
+      
+      <Field
+        id="sourceXML" type="textfield">
+        <Label>IP Address</Label>
+      </Field>
+      <Field id="example3" type="label" fontSize="small" fontColor="black" alignText="right" >
+        <Label> Envoy IP - will need to enable static IP address in DHCP Server</Label>
+      </Field>
+
+
+      <Field
+        id="envoySerial" type="textfield">
+        <Label>Envoy Serial Number</Label>
+      </Field>
+      <Field id="example5" type="label" fontSize="small" fontColor="black" alignText="right">
+        <Label>To Enable per Panel Data Access</Label>
+      </Field>
+
+      <Field id="activatePanels" type="checkbox" defaultValue="false" tooltip="Would you like Panel Devices?">
+      <Label>Enable Panel Data?:</Label>
+      <Description>Would you like to access per panel Data?</Description>
+          </Field>
+
+        <Field id="label11" type="label" alignText="right" fontColor="black">
+        <Label>(Enable and Generate Panels Below)</Label>
+      </Field>
+
+
+
+      <Field id="generatePanelDevices"
+				   type="button"
+				   tooltip="Click on this button to Generate one device for every Panel"
+                visibleBindingId="activatePanels" visibleBindingValue="true">
+				<Label>Generate Panel Indigo Devices</Label>
+				<Title>Generate Panels</Title>
+				<CallbackMethod>generatePanelDevices</CallbackMethod>
+	</Field>
+     <Field id="deletePanelDevices"
+				   type="button"
+				   tooltip="Click on this button to Generate one device for every Panel"
+                visibleBindingId="activatePanels" visibleBindingValue="false">
+				<Label>Delete Panel Indigo Devices</Label>
+				<Title>Delete Panels</Title>
+				<CallbackMethod>deletePanelDevices</CallbackMethod>
+
+
+
+    </Field>
+<!-- Substitution -->
+
+</ConfigUI>
+
+    <States>
+      <State id="deviceIsOnline">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Device online?</TriggerLabel>
+        <ControlPageLabel>Device online?</ControlPageLabel>
+      </State>
+      <State id="powerStatus">
+        <ValueType>
+          <List>
+          <Option value="offline">Offline</Option>
+          <Option value="importing">Importing Energy</Option>
+           <Option value="exporting">Exporting Energy</Option>
+          </List>
+        </ValueType>
+        <TriggerLabel>Power Generation Status</TriggerLabel>
+        <ControlPageLabel>Power Generation Status</ControlPageLabel>
+      </State>
+      <State id="deviceLastUpdated">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Device Last Updated</TriggerLabel>
+        <ControlPageLabel>Device Last Updated</ControlPageLabel>
+           </State>
+
+      <State id="numberInverters">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Number of MicroInverters</TriggerLabel>
+        <ControlPageLabel>Number of Microinverters</ControlPageLabel>
+      </State>
+
+
+     <State id="productionWattsNow">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production (watts)</TriggerLabel>
+        <ControlPageLabel>Power Production (watts)</ControlPageLabel>
+      </State>
+
+      <State id="consumptionWattsNow">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power consumption (watts)</TriggerLabel>
+        <ControlPageLabel>Power consumption (watts)</ControlPageLabel>
+      </State>
+
+      <State id="netConsumptionWattsNow">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Net Use of Power Watts</TriggerLabel>
+        <ControlPageLabel>Net Use of Power (Watts)</ControlPageLabel>
+      </State>
+
+
+     <State id="production7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production 7 days(watts)</TriggerLabel>
+        <ControlPageLabel>Power Production 7 days (watts)</ControlPageLabel>
+      </State>
+     <State id="consumption7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Consumption 7 days(watts)</TriggerLabel>
+        <ControlPageLabel>Power Consumption 7 days (watts)</ControlPageLabel>
+      </State>
+      <State id="readingTime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Time of Completed Power Reading</TriggerLabel>
+        <ControlPageLabel>Time of Completed Power Reading</ControlPageLabel>
+      </State>
+      <State id="secsSinceReading">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Seconds since last Power Reading</TriggerLabel>
+        <ControlPageLabel>Seconds since last Power Reading</ControlPageLabel>
+      </State>
+      <State id="storageActiveCount">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Storage Number Active</TriggerLabel>
+        <ControlPageLabel>Storage Number Active</ControlPageLabel>
+      </State>
+     <State id="storageWattsNow">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Storage Watts Now</TriggerLabel>
+        <ControlPageLabel>Storage Watts Now</ControlPageLabel>
+      </State>
+      <State id="storageState">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Storage State</TriggerLabel>
+        <ControlPageLabel>Storage State</ControlPageLabel>
+      </State>
+      <State id="storagePercentFull">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Storage percent Full</TriggerLabel>
+        <ControlPageLabel>Storage percent Full</ControlPageLabel>
+      </State>
+
+
+
+    </States>
+
+    <UiDisplayStateId>powerStatus</UiDisplayStateId>
+
+  </Device>
+  <Device type="custom" id="EnphasePanelDevice">
+    <Name>Enphase Panel</Name>
+
+    <States>
+      <State id="deviceIsOnline">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Device online?</TriggerLabel>
+        <ControlPageLabel>Device online?</ControlPageLabel>
+      </State>
+      <State id="deviceLastUpdated">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Device Last Updated</TriggerLabel>
+        <ControlPageLabel>Device Last Updated</ControlPageLabel>
+           </State>
+      <State id="watts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Generated</TriggerLabel>
+        <ControlPageLabel>Power Generated</ControlPageLabel>
+      </State>
+
+      <State id="maxWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Max Watts Generated</TriggerLabel>
+        <ControlPageLabel>Max Watts Generated</ControlPageLabel>
+      </State>
+
+      <State id="serialNo">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Serial No Panel</TriggerLabel>
+        <ControlPageLabel>Serial No Panel</ControlPageLabel>
+      </State>
+      <State id="modelNo">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Model No Panel</TriggerLabel>
+        <ControlPageLabel>Model No Panel</ControlPageLabel>
+      </State>
+      <State id="status">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Status Panel</TriggerLabel>
+        <ControlPageLabel>Status Panel</ControlPageLabel>
+      </State>
+      <State id="producing">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Producing Energy</TriggerLabel>
+        <ControlPageLabel>Producing Energy</ControlPageLabel>
+      </State>
+      <State id="communicating">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Panel Communicating </TriggerLabel>
+        <ControlPageLabel>Panel Communicating</ControlPageLabel>
+      </State>
+    </States>
+
+    <UiDisplayStateId>watts</UiDisplayStateId>
+
+  </Device>
+</Devices>

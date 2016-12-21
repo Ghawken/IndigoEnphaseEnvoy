@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<PluginConfig>
+  <Field id="infoLabel0" type="label" fontColor="black">
+    <Label>Enphase Envoy Plugin</Label>
+  </Field>
+
+  <Field id="space0" type="label" fontColor="black" fontSize="small">
+    <Label>Developed by: GlennNZ</Label>
+  </Field>
+
+
+  <Field id="space1" type="label" fontColor="black">
+    <Label>Check for Updates:</Label>
+  </Field>
+
+  <Field id="space2" type="label" fontSize="small" fontColor="black">
+    <Label>The amount of time that the plugin will wait between checking for updated version</Label>
+  </Field>
+
+  <Field id="configUpdaterInterval" type="textfield" defaultValue="24" tooltip="Select preference for how often updates will be checked">
+    <Label>Update Check Interval:(hours)</Label>
+  </Field>
+
+  <Field id="configUpdaterForceUpdate" type="checkbox" tooltip="Will automatic install newer version at check.">
+    <Label> Automatically install newer version at time of check</Label>
+    <Description>Enable/Disable</Description>
+  </Field>
+
+
+  <Field id="space10" type="label" alignText="right">
+    <Label>Debugging:</Label>
+  </Field>
+
+  <Field id="sep4" type="separator"/>
+
+  <Field id="space11" type="label" fontSize="small">
+    <Label>Turn on debugging only when needed. Be careful when posting the output to the forums or other public places as it could expose sensitive information.</Label>
+  </Field>
+
+  <Field id="showDebugInfo" type="checkbox" tooltip="Enabling will result in verbose logging.">
+    <Label> </Label>
+    <Description>Enable/Disable</Description>
+  </Field>
+
+  <Field id="showDebugLevel" type="menu" defaultValue="Low" tooltip="Controls the amount of debug information written to the log.">
+    <Label>Debug level:</Label>
+    <Description>Enable/Disable</Description>
+    <List>
+      <Option value="1">Low</Option>
+      <Option value="2">Medium</Option>
+      <Option value="3">High</Option>
+    </List>
+  </Field>
+
+</PluginConfig>
