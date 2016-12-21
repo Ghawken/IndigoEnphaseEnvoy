@@ -418,7 +418,7 @@ class Plugin(indigo.PluginBase):
             #dev.stateListOrDisplayStateIdChanged()
             update_time = t.strftime("%m/%d/%Y at %H:%M")
             dev.updateStateOnServer('deviceLastUpdated', value=update_time)
-            reading_time = datetime.datetime.fromtimestamp(self.finalDict['production'][0]['readingTime'])
+            reading_time = datetime.datetime.fromtimestamp(self.finalDict['production'][1]['readingTime'])
             #format_reading_time = t.strftime()
             dev.updateStateOnServer('readingTime', value=str(reading_time))
             timeDifference = int(t.time() - t.mktime(reading_time.timetuple()))
