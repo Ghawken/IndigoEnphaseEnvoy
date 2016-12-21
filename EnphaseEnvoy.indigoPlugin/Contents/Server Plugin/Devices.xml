@@ -11,7 +11,7 @@
             <Field id="label4" type="label" fontSize="small" fontColor="black">
         <Label></Label>
       </Field>
-      
+       <Field id="sep1" type="separator"/>
 
       
       <Field
@@ -21,7 +21,7 @@
       <Field id="example3" type="label" fontSize="small" fontColor="black" alignText="right" >
         <Label> Envoy IP - will need to enable static IP address in DHCP Server</Label>
       </Field>
-
+         <Field id="sep2" type="separator"/>
 
       <Field
         id="envoySerial" type="textfield">
@@ -30,16 +30,17 @@
       <Field id="example5" type="label" fontSize="small" fontColor="black" alignText="right">
         <Label>To Enable per Panel Data Access</Label>
       </Field>
+ <Field id="sep4" type="separator"/>
 
       <Field id="activatePanels" type="checkbox" defaultValue="false" tooltip="Would you like Panel Devices?">
       <Label>Enable Panel Data?:</Label>
       <Description>Would you like to access per panel Data?</Description>
           </Field>
 
-        <Field id="label11" type="label" alignText="right" fontColor="black">
+        <Field id="label11" type="label" alignText="right" fontSize='small' fontColor="black">
         <Label>(Enable and Generate Panels Below)</Label>
       </Field>
-
+ <Field id="sep5" type="separator"/>
 
 
       <Field id="generatePanelDevices"
@@ -47,7 +48,7 @@
 				   tooltip="Click on this button to Generate one device for every Panel"
                 visibleBindingId="activatePanels" visibleBindingValue="true">
 				<Label>Generate Panel Indigo Devices</Label>
-				<Title>Generate Panels</Title>
+				<Title>Generate Panel Devices</Title>
 				<CallbackMethod>generatePanelDevices</CallbackMethod>
 	</Field>
      <Field id="deletePanelDevices"
@@ -55,7 +56,7 @@
 				   tooltip="Click on this button to Generate one device for every Panel"
                 visibleBindingId="activatePanels" visibleBindingValue="false">
 				<Label>Delete Panel Indigo Devices</Label>
-				<Title>Delete Panels</Title>
+				<Title>Delete Panel Devices</Title>
 				<CallbackMethod>deletePanelDevices</CallbackMethod>
 
 

@@ -102,6 +102,8 @@ class GitHubPluginUpdater(object):
         latestVersion = update['tag_name'].lstrip('v')
         self._debug('Latest release is: %s' % latestVersion)
 
+        #Check if prerelease and ignore - don' update
+
         if (ver(currentVersion) >= ver(latestVersion)):
             return None
 

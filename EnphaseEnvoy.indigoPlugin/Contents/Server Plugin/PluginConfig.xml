@@ -1,18 +1,18 @@
 <?xml version="1.0"?>
 <PluginConfig>
-  <Field id="infoLabel0" type="label" fontColor="black">
+  <Field id="infoLabel0" type="label" fontSize='large' fontColor="black">
     <Label>Enphase Envoy Plugin</Label>
   </Field>
 
-  <Field id="space0" type="label" fontColor="black" fontSize="small">
+  <Field id="space0" type="label" fontColor="black" >
     <Label>Developed by: GlennNZ</Label>
   </Field>
-
+  <Field id="sep7" type="separator"/>
 
   <Field id="space1" type="label" fontColor="black">
     <Label>Check for Updates:</Label>
   </Field>
-
+  <Field id="sep6" type="separator"/>
   <Field id="space2" type="label" fontSize="small" fontColor="black">
     <Label>The amount of time that the plugin will wait between checking for updated version</Label>
   </Field>
@@ -25,9 +25,9 @@
     <Label> Automatically install newer version at time of check</Label>
     <Description>Enable/Disable</Description>
   </Field>
+ <Field id="sep9" type="separator"/>
 
-
-  <Field id="space10" type="label" alignText="right">
+  <Field id="space10" type="label" alignText="left">
     <Label>Debugging:</Label>
   </Field>
 
