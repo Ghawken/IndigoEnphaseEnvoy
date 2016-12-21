@@ -101,7 +101,10 @@ class GitHubPluginUpdater(object):
         # assume the tag is the release version
         latestVersion = update['tag_name'].lstrip('v')
         self._debug('Latest release is: %s' % latestVersion)
-
+        zipball = update.get('zipball_url', None)
+        assets = update.get('assets_url', None)
+        self._debug(unicode(zipball))
+        self._debug(unicode(assets))
         #Check if prerelease and ignore - don' update
 
         if (ver(currentVersion) >= ver(latestVersion)):
@@ -307,7 +310,7 @@ class GitHubPluginUpdater(object):
         zipball = release.get('zipball_url', None)
         if (zipball == None):
             raise Exception('Invalid release package: no zipball')
-
+        #self._error(unicode(zipball))
         self._debug('Downloading zip file: %s' % zipball)
 
         zipdata = urlopen(zipball).read()
