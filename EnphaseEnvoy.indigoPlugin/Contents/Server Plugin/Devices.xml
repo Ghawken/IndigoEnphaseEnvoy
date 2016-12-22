@@ -94,7 +94,11 @@
         <TriggerLabel>Number of MicroInverters</TriggerLabel>
         <ControlPageLabel>Number of Microinverters</ControlPageLabel>
       </State>
-
+     <State id="productionWattsToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Today (watts)</TriggerLabel>
+        <ControlPageLabel>Power Production Today(watts)</ControlPageLabel>
+      </State>
 
      <State id="productionWattsNow">
         <ValueType>Number</ValueType>
@@ -107,7 +111,11 @@
         <TriggerLabel>Power consumption (watts)</TriggerLabel>
         <ControlPageLabel>Power consumption (watts)</ControlPageLabel>
       </State>
-
+      <State id="consumptionWattsToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power consumption Today (watts)</TriggerLabel>
+        <ControlPageLabel>Power consumption Today (watts)</ControlPageLabel>
+      </State>
       <State id="netConsumptionWattsNow">
         <ValueType>Number</ValueType>
         <TriggerLabel>Net Use of Power Watts</TriggerLabel>
@@ -135,6 +143,14 @@
         <TriggerLabel>Seconds since last Power Reading</TriggerLabel>
         <ControlPageLabel>Seconds since last Power Reading</ControlPageLabel>
       </State>
+
+        <State id="generatingPower">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Generating Power True or False</TriggerLabel>
+        <ControlPageLabel>Generating Power True or False</ControlPageLabel>
+      </State>
+
+
       <State id="storageActiveCount">
         <ValueType>Number</ValueType>
         <TriggerLabel>Storage Number Active</TriggerLabel>

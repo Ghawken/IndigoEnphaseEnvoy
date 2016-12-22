@@ -102,9 +102,14 @@ class Plugin(indigo.PluginBase):
         if dev.model=='Enphase Panel':
             #self.errorLog(' Enphase Panel')
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+            dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
+            dev.updateStateOnServer('watts', value='Offline')
             dev.stateListOrDisplayStateIdChanged()
             return
+
+
         #dev.stateListOrDisplayStateIdChanged()
+        dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
         dev.stateListOrDisplayStateIdChanged()
 
@@ -320,6 +325,18 @@ class Plugin(indigo.PluginBase):
                                 dev.updateStateOnServer('modelNo', value=str(devices['part_num']))
                                 dev.updateStateOnServer('producing',   value=str(devices['producing']))
                                 dev.updateStateOnServer('communicating', value=str(devices['communicating']))
+                                #self.errorLog(unicode(devices['producing']))
+                                if devices['producing']==False:
+                                    #self.errorLog(unicode('Here Producing is Negative'))
+                                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
+                                    dev.updateStateOnServer('watts', value=0, uiValue='Offline')
+
+
+                                #else:
+                                    #self.errorLog(unicode('Here Producing is Positive'))
+                                    #dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
+
+
                     return
 
             except Exception as error:
@@ -408,7 +425,8 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('netConsumptionWattsNow', value=int(self.finalDict['consumption'][1]['wNow']))
             dev.updateStateOnServer('production7days', value=int(self.finalDict['production'][1]['whLastSevenDays']))
             dev.updateStateOnServer('consumption7days', value=int(self.finalDict['consumption'][0]['whLastSevenDays']))
-
+            dev.updateStateOnServer('consumptionWattsToday', value=int(self.finalDict['consumption'][0]['whToday']))
+            dev.updateStateOnServer('productionWattsToday', value=int(self.finalDict['production'][1]['whToday']))
 
             dev.updateStateOnServer('storageActiveCount', value=int(self.finalDict['storage'][0]['activeCount']))
             dev.updateStateOnServer('storageWattsNow', value=int(self.finalDict['storage'][0]['wNow']))
@@ -426,12 +444,18 @@ class Plugin(indigo.PluginBase):
 
             if int(self.finalDict['production'][1]['wNow']) >= int(self.finalDict['consumption'][0]['wNow']) :
                 #Generating more Power
-                dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
+                if self.debugLevel >= 2:
+                    self.debugLog(u'Exporting Power')
                 dev.updateStateImageOnServer(indigo.kStateImageSel.EnergyMeterOff)
+                dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
+                dev.updateStateOnServer('generatingPower', value=True)
             else:
                 #Must be opposite or offline
-                dev.updateStateOnServer('powerStatus', value = 'importing', uiValue='Importing Power')
+                if self.debugLevel >= 2:
+                    self.debugLog(u'Importing power')
                 dev.updateStateImageOnServer(indigo.kStateImageSel.EnergyMeterOn)
+                dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
+                dev.updateStateOnServer('generatingPower', value=False)
 
         except Exception as error:
              if self.debugLevel >= 2:
