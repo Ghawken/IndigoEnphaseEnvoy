@@ -184,6 +184,18 @@ class Plugin(indigo.PluginBase):
         try:
             x=0
             y=0
+            #One quick check on startup - to avoid Panel delays
+
+            for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
+                if self.debugLevel>=2:
+                    self.debugLog(u'Quick Checks Before Loop')
+            self.refreshDataForDev(dev)
+            self.sleep(30)
+            self.checkThePanels(dev)
+            self.sleep(30)
+            self.checkPanelInventory(dev)
+            self.sleep(10)
+
             while True:
 
                 if self.debugLevel >= 2:
@@ -245,15 +257,15 @@ class Plugin(indigo.PluginBase):
         The getTheData() method is used to retrieve  API Client Data
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"getTheData FrontViewAPI method called.")
+            self.debugLog(u"getTheData PRODUCTION METHOD method called.")
 
 
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/production.json'
-            r = requests.get(url,timeout=1)
+            r = requests.get(url,timeout=4)
             result = r.json()
             if self.debugLevel >= 2:
-                self.debugLog(u"Result:" + unicode(result))
+                self.debugLog(u"Result:" + str(result))
 
             dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
@@ -263,7 +275,7 @@ class Plugin(indigo.PluginBase):
 
         except Exception as error:
 
-            indigo.server.log(u"Error connecting to Device:" + dev.name)
+            indigo.server.log(u"Error connecting to Device:" + unicode(dev.name) +"Error is:"+unicode(error.message))
             self.WaitInterval = 60
             if self.debugLevel >= 2:
                 self.debugLog(u"Device is offline. No data to return. ")
@@ -309,7 +321,7 @@ class Plugin(indigo.PluginBase):
         if self.debugLevel >= 2:
             self.debugLog(u"checkPanelInventory Enphase Panels method called.")
 
-        if dev.pluginProps['activatePanels']:
+        if dev.pluginProps['activatePanels'] and dev.states['deviceIsOnline']:
 
             self.inventoryDict = self.getInventoryData(dev)
 
@@ -376,7 +388,7 @@ class Plugin(indigo.PluginBase):
         if self.debugLevel >= 2:
             self.debugLog(u"getthePanels Enphase Envoy method called.")
 
-        if dev.pluginProps['envoySerial'] is not None:
+        if dev.pluginProps['envoySerial'] is not None and dev.states['deviceIsOnline']:
 
             try:
                 url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production/inverters'
