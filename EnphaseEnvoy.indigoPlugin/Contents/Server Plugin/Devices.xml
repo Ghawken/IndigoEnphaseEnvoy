@@ -221,12 +221,12 @@
         <ControlPageLabel>Status Panel</ControlPageLabel>
       </State>
       <State id="producing">
-        <ValueType>String</ValueType>
+        <ValueType>Boolean</ValueType>
         <TriggerLabel>Producing Energy</TriggerLabel>
         <ControlPageLabel>Producing Energy</ControlPageLabel>
       </State>
       <State id="communicating">
-        <ValueType>String</ValueType>
+        <ValueType>Boolean</ValueType>
         <TriggerLabel>Panel Communicating </TriggerLabel>
         <ControlPageLabel>Panel Communicating</ControlPageLabel>
       </State>

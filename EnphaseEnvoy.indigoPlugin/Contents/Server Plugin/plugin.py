@@ -44,6 +44,7 @@ class Plugin(indigo.PluginBase):
         indigo.PluginBase.__init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.debugLog(u"Initializing Enphase plugin.")
 
+        self.timeOutCount = 0
         self.debug = self.pluginPrefs.get('showDebugInfo', False)
         self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
         self.deviceNeedsUpdated = ''
@@ -211,7 +212,7 @@ class Plugin(indigo.PluginBase):
                         self.checkThePanels(dev)
                         self.sleep(5)
                         x=0
-                    if y>=10:
+                    if y>=8:
                         self.checkPanelInventory(dev)
                         self.sleep(5)
                         y=0
@@ -285,6 +286,8 @@ class Plugin(indigo.PluginBase):
             result = None
             return result
 
+
+
     def checkThePanels(self,dev):
 
         if self.debugLevel >= 2:
@@ -299,6 +302,7 @@ class Plugin(indigo.PluginBase):
                     for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
                         deviceName = 'Enphase SolarPanel ' + str(x)
                         if dev.states['producing']:
+
                             dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']))
                         dev.updateStateOnServer('serialNo', value=float(self.thePanels[x - 1]['serialNumber']))
                         dev.updateStateOnServer('maxWatts', value=int(self.thePanels[x - 1]['maxReportWatts']))
@@ -335,11 +339,15 @@ class Plugin(indigo.PluginBase):
                                # self.errorLog(u'panel serial no:'+str(devices['serial_num']))
 
                             if int(dev.states['serialNo']) == int(devices['serial_num']):
+
+
                                 if dev.states['producing']==True and devices['producing']==False:
+                                    self.errorLog(u'Producing 2 True'+str(devices['producing']))
                                     #  change only once
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
                                     dev.updateStateOnServer('watts', value=0, uiValue='--')
                                 if dev.states['producing'] == False and devices['producing'] == True:
+                                    self.errorLog(u'Producing 2 True' + str(devices['producing']))
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
 
                                 dev.updateStateOnServer('status',   value=str(devices['device_status']))
