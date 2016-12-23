@@ -250,7 +250,7 @@ class Plugin(indigo.PluginBase):
                             # dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Download")
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/production.json'
-            r = requests.get(url)
+            r = requests.get(url,timeout=1)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + unicode(result))
@@ -321,15 +321,18 @@ class Plugin(indigo.PluginBase):
                                # self.errorLog(u'panel serial no:'+str(devices['serial_num']))
 
                             if int(dev.states['serialNo']) == int(devices['serial_num']):
+                                if dev.states['producing']==True and devices['producing']==False:
+                                    #  change only once
+                                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
+                                    dev.updateStateOnServer('watts', value=0, uiValue='--')
+                                if dev.states['producing'] == False and devices['producing'] == True:
+                                    dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
+
                                 dev.updateStateOnServer('status',   value=str(devices['device_status']))
                                 dev.updateStateOnServer('modelNo', value=str(devices['part_num']))
                                 dev.updateStateOnServer('producing',   value=str(devices['producing']))
                                 dev.updateStateOnServer('communicating', value=str(devices['communicating']))
                                 #self.errorLog(unicode(devices['producing']))
-                                if devices['producing']==False:
-                                    #self.errorLog(unicode('Here Producing is Negative'))
-                                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
-                                    dev.updateStateOnServer('watts', value=0, uiValue='Offline')
 
 
                                 #else:
@@ -357,7 +360,7 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getInventoryData Enphase Panels method called.")
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/inventory.json'
-            r = requests.get(url)
+            r = requests.get(url, timeout =5)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Inventory Result:" + unicode(result))
@@ -387,7 +390,7 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+unicode(password))
 
-                r = requests.get(url, auth=HTTPDigestAuth('envoy',password))
+                r = requests.get(url, auth=HTTPDigestAuth('envoy',password), timeout=2)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(u"Inverter Result:" + unicode(result))
