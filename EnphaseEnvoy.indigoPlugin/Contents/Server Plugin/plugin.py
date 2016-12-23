@@ -195,17 +195,17 @@ class Plugin(indigo.PluginBase):
 
                     self.refreshDataForDev(dev)
                     self.sleep(1)
-                    if x>=10 or x==0:
+                    if x>=5:
                         self.checkThePanels(dev)
-                        self.sleep(2)
+                        self.sleep(5)
                         x=0
-                    if y>5:
+                    if y>=10:
                         self.checkPanelInventory(dev)
                         self.sleep(5)
                         y=0
                 x=x+1
                 y=y+1
-                self.sleep(15)
+                self.sleep(60)
 
         except self.StopThread:
             self.debugLog(u'Restarting/or error. Stopping Enphase/Envoy thread.')
@@ -242,12 +242,12 @@ class Plugin(indigo.PluginBase):
 
     def getTheData(self, dev):
         """
-        The getTheData() method is used to retrieve FrontView API Client Data
+        The getTheData() method is used to retrieve  API Client Data
         """
         if self.debugLevel >= 2:
             self.debugLog(u"getTheData FrontViewAPI method called.")
 
-                            # dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Download")
+
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/production.json'
             r = requests.get(url,timeout=1)
@@ -270,7 +270,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
             dev.updateStateOnServer('powerStatus', value = 'offline')
             dev.setErrorStateOnServer(u'Offline')
-            result = ""
+            result = None
             return result
 
     def checkThePanels(self,dev):
@@ -279,13 +279,15 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u'check thepanels called')
         if dev.pluginProps['activatePanels']:
             self.thePanels = self.getthePanels(dev)
+
             try:
                 if self.thePanels is not None:
                     x = 1
                     update_time = t.strftime("%m/%d/%Y at %H:%M")
                     for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
                         deviceName = 'Enphase SolarPanel ' + str(x)
-                        dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']))
+                        if dev.states['producing']:
+                            dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']))
                         dev.updateStateOnServer('serialNo', value=float(self.thePanels[x - 1]['serialNumber']))
                         dev.updateStateOnServer('maxWatts', value=int(self.thePanels[x - 1]['maxReportWatts']))
                         dev.updateStateOnServer('deviceLastUpdated', value=update_time)
@@ -293,7 +295,7 @@ class Plugin(indigo.PluginBase):
                         x = x + 1
 
             except Exception as error:
-                self.errorLog('error within checkthePanels'+unicode(error.message))
+                self.errorLog('error within checkthePanels:'+unicode(error.message))
                 if self.debugLevel >= 2:
                     self.debugLog(u"Device is offline. No data to return. ")
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
@@ -332,12 +334,6 @@ class Plugin(indigo.PluginBase):
                                 dev.updateStateOnServer('modelNo', value=str(devices['part_num']))
                                 dev.updateStateOnServer('producing',   value=str(devices['producing']))
                                 dev.updateStateOnServer('communicating', value=str(devices['communicating']))
-                                #self.errorLog(unicode(devices['producing']))
-
-
-                                #else:
-                                    #self.errorLog(unicode('Here Producing is Positive'))
-                                    #dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
 
 
                     return
@@ -372,7 +368,7 @@ class Plugin(indigo.PluginBase):
             if self.debugLevel >= 2:
                 self.debugLog(u"Device is offline. No data to return. ")
             # dev.updateStateOnServer('deviceTimestamp', value=t.time())
-            result = ""
+            result = None
             return result
 
 
@@ -410,7 +406,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('watts', value=0)
                     dev.setErrorStateOnServer(u'Offline')
 
-                result = ""
+                result = None
                 return result
 
     def parseStateValues(self, dev):
