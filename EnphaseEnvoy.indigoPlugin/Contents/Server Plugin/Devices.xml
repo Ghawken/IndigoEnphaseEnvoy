@@ -179,6 +179,99 @@
     <UiDisplayStateId>powerStatus</UiDisplayStateId>
 
   </Device>
+
+    <Device type="custom" id="EnphaseEnvoyLegacy">
+    <Name>Enphase Legacy</Name>
+
+    <ConfigUI>
+      <Field id="label3" type="label" fontColor="black">
+        <Label>Envoy IP Address:</Label>
+      </Field>
+            <Field id="label4" type="label" fontSize="small" fontColor="black">
+        <Label></Label>
+      </Field>
+       <Field id="sep1" type="separator"/>
+
+
+      <Field
+        id="sourceXML" type="textfield">
+        <Label>IP Address</Label>
+      </Field>
+      <Field id="example3" type="label" fontSize="small" fontColor="black" alignText="right" >
+        <Label> Envoy IP - will need to enable static IP address in DHCP Server</Label>
+      </Field>
+         <Field id="sep2" type="separator"/>
+
+      <Field
+        id="envoySerial" type="textfield">
+        <Label>Envoy Serial Number</Label>
+      </Field>
+      <Field id="example5" type="label" fontSize="small" fontColor="black" alignText="right">
+        <Label>To Enable per Panel Data Access</Label>
+      </Field>
+ <Field id="sep4" type="separator"/>
+
+
+
+
+
+<!-- Substitution -->
+
+</ConfigUI>
+
+    <States>
+      <State id="deviceIsOnline">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Device online?</TriggerLabel>
+        <ControlPageLabel>Device online?</ControlPageLabel>
+      </State>
+            <State id="deviceLastUpdated">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Device Last Updated</TriggerLabel>
+        <ControlPageLabel>Device Last Updated</ControlPageLabel>
+           </State>
+
+     <State id="wattHoursToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Today (watts)</TriggerLabel>
+        <ControlPageLabel>Power Production Today(watts)</ControlPageLabel>
+      </State>
+
+     <State id="wattsNow">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production (watts)</TriggerLabel>
+        <ControlPageLabel>Power Production (watts)</ControlPageLabel>
+      </State>
+
+
+     <State id="wattHoursLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Lifetime(watts)</TriggerLabel>
+        <ControlPageLabel>Power Production Lifetime (watts)</ControlPageLabel>
+      </State>
+
+
+
+     <State id="wattHoursSevenDays">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production 7 days(watts)</TriggerLabel>
+        <ControlPageLabel>Power Production 7 days (watts)</ControlPageLabel>
+      </State>
+
+
+
+
+
+    </States>
+
+    <UiDisplayStateId>powerStatus</UiDisplayStateId>
+
+  </Device>
+
+
+
+
+
   <Device type="custom" id="EnphasePanelDevice">
     <Name>Enphase Panel</Name>
 
