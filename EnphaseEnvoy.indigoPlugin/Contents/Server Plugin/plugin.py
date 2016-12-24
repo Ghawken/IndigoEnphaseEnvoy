@@ -423,7 +423,7 @@ class Plugin(indigo.PluginBase):
                                     if self.debugLevel >= 1:
                                         self.debugLog(u'States Producing False, and devices now shows True: device(producing):' + str(devices['producing']))
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
-
+                                    dev.updateStateOnServer('watts', value=dev.states['watts'], uiValue=str(dev.states['watts']))
                                 dev.updateStateOnServer('status',   value=str(devices['device_status']))
                                 dev.updateStateOnServer('modelNo', value=str(devices['part_num']))
                                 dev.updateStateOnServer('producing',   value=devices['producing'])
