@@ -94,7 +94,7 @@ class Plugin(indigo.PluginBase):
     def deviceStartComm(self, dev):
         if self.debugLevel >= 2:
             self.debugLog(u"deviceStartComm() method called.")
-        indigo.server.log(u"Starting Enphase/Envoy device: " + dev.name)
+
 
         #self.errorLog(unicode(dev.model))
 
@@ -103,16 +103,16 @@ class Plugin(indigo.PluginBase):
         if dev.model=='Enphase Panel':
             #self.errorLog(' Enphase Panel')
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
-            dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
-            dev.updateStateOnServer('watts', value='Offline')
-            dev.stateListOrDisplayStateIdChanged()
+            #dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
+            dev.updateStateOnServer('watts', value=0)
+            dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
             return
-
-
-        #dev.stateListOrDisplayStateIdChanged()
-        dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
+        #number_Panels = 0
+        #numer_Panels = indigo.devices.len(filter='self.EnphasePanelDevice')
+        indigo.server.log(u"Starting Enphase/Envoy device: " + dev.name )
+        dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
-        dev.stateListOrDisplayStateIdChanged()
+
 
 
 # Default Indigo Plugin StateList
@@ -169,6 +169,33 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"deviceStopComm() method called.")
         indigo.server.log(u"Stopping Enphase device: " + dev.name)
         dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Disabled")
+        if dev.model == 'Enphase Envoy-S':
+            dev.updateStateOnServer('powerStatus', value='offline', uiValue='Offline')
+            dev.updateStateOnServer('generatingPower', value=False)
+            dev.updateStateOnServer('numberInverters', value=0)
+            dev.updateStateOnServer('productionWattsNow', value=0)
+            dev.updateStateOnServer('consumptionWattsNow', value=0)
+            dev.updateStateOnServer('netConsumptionWattsNow', value=0)
+            dev.updateStateOnServer('production7days', value=0)
+            dev.updateStateOnServer('consumption7days', value=0)
+            dev.updateStateOnServer('consumptionWattsToday', value=0)
+            dev.updateStateOnServer('productionWattsToday', value=0)
+            dev.updateStateOnServer('storageActiveCount', value=0)
+            dev.updateStateOnServer('storageWattsNow', value=0)
+            dev.updateStateOnServer('storageState', value='Offline')
+            dev.updateStateOnServer('storagePercentFull', value=0)
+            dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
+        if dev.model == 'Enphase Panel':
+            dev.updateStateOnServer('watts', value=0)
+            #dev.updateStateOnServer('serialNo', value=0)
+            dev.updateStateOnServer('maxWatts', value=0)
+            dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+            dev.updateStateOnServer('status', value='')
+            dev.updateStateOnServer('modelNo', value='')
+            dev.updateStateOnServer('producing', value=False)
+            dev.updateStateOnServer('communicating', value=False)
+            dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
+
 
     def forceUpdate(self):
         self.updater.update(currentVersion='0.0.0')
@@ -192,9 +219,9 @@ class Plugin(indigo.PluginBase):
                     self.debugLog(u'Quick Checks Before Loop')
             self.refreshDataForDev(dev)
             self.sleep(30)
-            self.checkThePanels(dev)
-            self.sleep(30)
             self.checkPanelInventory(dev)
+            self.sleep(30)
+            self.checkThePanels(dev)
             self.sleep(10)
 
             while True:
@@ -302,21 +329,22 @@ class Plugin(indigo.PluginBase):
                     for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
                         deviceName = 'Enphase SolarPanel ' + str(x)
                         if dev.states['producing']:
+                            dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']),uiValue=str(self.thePanels[x-1]['lastReportWatts']))
 
-                            dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']))
                         dev.updateStateOnServer('serialNo', value=float(self.thePanels[x - 1]['serialNumber']))
                         dev.updateStateOnServer('maxWatts', value=int(self.thePanels[x - 1]['maxReportWatts']))
                         dev.updateStateOnServer('deviceLastUpdated', value=update_time)
                         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
+                        dev.setErrorStateOnServer(None)
                         x = x + 1
 
             except Exception as error:
-                self.errorLog('error within checkthePanels:'+unicode(error.message))
+                self.errorLog('error within checkthePanels:'+unicode(error))
                 if self.debugLevel >= 2:
                     self.debugLog(u"Device is offline. No data to return. ")
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 dev.setErrorStateOnServer(u'Offline')
-                result = ""
+                result = None
                 return result
         return
 
@@ -337,34 +365,37 @@ class Plugin(indigo.PluginBase):
                                # self.debugLog(u'checking serial numbers')
                                # self.errorLog(u'device serial:'+str(int(dev.states['serialNo'])))
                                # self.errorLog(u'panel serial no:'+str(devices['serial_num']))
-
+                            #self.errorLog(u'Dev.states Producing type is' + str(type(dev.states['producing'])))
+                            #self.errorLog(u'Devices Producing type is' + str(type(devices['producing'])))
                             if int(dev.states['serialNo']) == int(devices['serial_num']):
 
 
                                 if dev.states['producing']==True and devices['producing']==False:
-                                    self.errorLog(u'Producing 2 True'+str(devices['producing']))
+                                    if self.debugLevel >= 1:
+                                        self.debugLog(u'Producing: States true, devices(producing) False: devices[prodcing] equals:'+str(devices['producing']))
                                     #  change only once
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
                                     dev.updateStateOnServer('watts', value=0, uiValue='--')
                                 if dev.states['producing'] == False and devices['producing'] == True:
-                                    self.errorLog(u'Producing 2 True' + str(devices['producing']))
-                                    dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
+                                    if self.debugLevel >= 1:
+                                        self.debugLog(u'States Producing False, and devices now shows True: device(producing):' + str(devices['producing']))
+                                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
 
                                 dev.updateStateOnServer('status',   value=str(devices['device_status']))
                                 dev.updateStateOnServer('modelNo', value=str(devices['part_num']))
-                                dev.updateStateOnServer('producing',   value=str(devices['producing']))
-                                dev.updateStateOnServer('communicating', value=str(devices['communicating']))
+                                dev.updateStateOnServer('producing',   value=devices['producing'])
+                                dev.updateStateOnServer('communicating', value=devices['communicating'])
 
 
                     return
 
             except Exception as error:
-                self.errorLog('error within checkthePanels'+unicode(error.message))
+                self.errorLog('error within checkPanelInventory:'+unicode(error))
                 if self.debugLevel >= 2:
                     self.debugLog(u"Device is offline. No data to return. ")
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 dev.setErrorStateOnServer(u'Offline')
-                result = ""
+                result = None
                 return result
 
         return
@@ -452,7 +483,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('storageState', value=self.finalDict['storage'][0]['state'])
             dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
 
-            #dev.stateListOrDisplayStateIdChanged()
+
             update_time = t.strftime("%m/%d/%Y at %H:%M")
             dev.updateStateOnServer('deviceLastUpdated', value=update_time)
             reading_time = datetime.datetime.fromtimestamp(self.finalDict['production'][1]['readingTime'])
@@ -460,22 +491,31 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('readingTime', value=str(reading_time))
             timeDifference = int(t.time() - t.mktime(reading_time.timetuple()))
             dev.updateStateOnServer('secsSinceReading', value=timeDifference)
+            if self.debugLevel >= 1:
+                self.debugLog("State Image Selector:"+str(dev.displayStateImageSel))
 
-            if int(self.finalDict['production'][1]['wNow']) >= int(self.finalDict['consumption'][0]['wNow']) :
-                #Generating more Power
+            if int(self.finalDict['production'][1]['wNow']) >= int(self.finalDict['consumption'][0]['wNow']) and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
+                #Generating more Power - and a change
+                # If Generating Power - but device believes importing - recent change unpdate to refleect
                 if self.debugLevel >= 2:
-                    self.debugLog(u'Exporting Power')
-                dev.updateStateImageOnServer(indigo.kStateImageSel.EnergyMeterOff)
+                    self.debugLog(u'**CHANGED**: Exporting Power')
+
                 dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
                 dev.updateStateOnServer('generatingPower', value=True)
-            else:
-                #Must be opposite or offline
+                dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
+                if self.debugLevel >= 1:
+                    self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+
+            if int(self.finalDict['production'][1]['wNow']) < int(self.finalDict['consumption'][0]['wNow']) and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
+                #Must be opposite or and again a change only
                 if self.debugLevel >= 2:
-                    self.debugLog(u'Importing power')
-                dev.updateStateImageOnServer(indigo.kStateImageSel.EnergyMeterOn)
+                    self.debugLog(u'**CHANGED**: Importing power')
+
                 dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
                 dev.updateStateOnServer('generatingPower', value=False)
-
+                dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+                if self.debugLevel >= 1:
+                    self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
         except Exception as error:
              if self.debugLevel >= 2:
                  self.errorLog(u"Saving Values errors:"+str(error.message))
@@ -559,7 +599,7 @@ class Plugin(indigo.PluginBase):
 
         except Exception as error:
             self.errorLog(u"Error refreshing devices. Please check settings.")
-            self.errorLog(unicode(error))
+            self.errorLog(unicode(error.message))
             return False
 
     def refreshDataForDev(self, dev):
