@@ -536,20 +536,57 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"Saving Values method called.")
 
         try:
-            dev.updateStateOnServer('numberInverters', value=int(self.finalDict['production'][0]['activeCount']))
-            dev.updateStateOnServer('productionWattsNow', value=int(self.finalDict['production'][1]['wNow']))
-            dev.updateStateOnServer('consumptionWattsNow', value=int(self.finalDict['consumption'][0]['wNow']))
-            dev.updateStateOnServer('netConsumptionWattsNow', value=int(self.finalDict['consumption'][1]['wNow']))
-            dev.updateStateOnServer('production7days', value=int(self.finalDict['production'][1]['whLastSevenDays']))
-            dev.updateStateOnServer('consumption7days', value=int(self.finalDict['consumption'][0]['whLastSevenDays']))
-            dev.updateStateOnServer('consumptionWattsToday', value=int(self.finalDict['consumption'][0]['whToday']))
-            dev.updateStateOnServer('productionWattsToday', value=int(self.finalDict['production'][1]['whToday']))
+            consumptionWatts =0
+            productionWatts =0
+            check = "production" in self.finalDict
+            # Check that finalDict contains a production list
+            if check:
+                dev.updateStateOnServer('numberInverters', value=int(self.finalDict['production'][0]['activeCount']))
+                if len(self.finalDict['production'])>1:
+                    dev.updateStateOnServer('productionWattsNow', value=int(self.finalDict['production'][1]['wNow']))
+                    productionWatts = int(self.finalDict['production'][1]['wNow'])
+                    dev.updateStateOnServer('production7days', value=int(self.finalDict['production'][1]['whLastSevenDays']))
+                    dev.updateStateOnServer('productionWattsToday', value=int(self.finalDict['production'][1]['whToday']))
+                else:
+                    if self.debugLevel >= 2:
+                        self.debugLog(u"no Production 2 result found.")
+                    dev.updateStateOnServer('productionWattsNow', value=0)
+                    dev.updateStateOnServer('production7days',value=0)
+                    dev.updateStateOnServer('productionWattsToday',value=0)
+            else:
+                if self.debugLevel >= 2:
+                    self.debugLog(u"no Production result found.")
+                dev.updateStateOnServer('numberInverters', value=0)
 
-            dev.updateStateOnServer('storageActiveCount', value=int(self.finalDict['storage'][0]['activeCount']))
-            dev.updateStateOnServer('storageWattsNow', value=int(self.finalDict['storage'][0]['wNow']))
-            dev.updateStateOnServer('storageState', value=self.finalDict['storage'][0]['state'])
-            dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
+            check = "consumption" in self.finalDict
 
+            if check:
+                dev.updateStateOnServer('consumptionWattsNow', value=int(self.finalDict['consumption'][0]['wNow']))
+                consumptionWatts = int(self.finalDict['consumption'][0]['wNow'])
+                dev.updateStateOnServer('consumption7days', value=int(self.finalDict['consumption'][0]['whLastSevenDays']))
+                dev.updateStateOnServer('consumptionWattsToday', value=int(self.finalDict['consumption'][0]['whToday']))
+                if len(self.finalDict['consumption'])>1:
+                    dev.updateStateOnServer('netConsumptionWattsNow', value=int(self.finalDict['consumption'][1]['wNow']))
+                else:
+                    if self.debugLevel >=2:
+                        self.debugLog(u'No netConsumption being reporting.....Calculating....')
+                    # Calculate?
+                    #
+                    netConsumption = int(self.finalDict['production'][1]['wNow']) - int (self.finalDict['consumption'][0]['wNow'])
+                    dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
+            else:
+                if self.debugLevel >= 2:
+                    self.debugLog(u"no Consumption result found.")
+
+            check = "storage" in self.finalDict
+            if check:
+                dev.updateStateOnServer('storageActiveCount', value=int(self.finalDict['storage'][0]['activeCount']))
+                dev.updateStateOnServer('storageWattsNow', value=int(self.finalDict['storage'][0]['wNow']))
+                dev.updateStateOnServer('storageState', value=self.finalDict['storage'][0]['state'])
+                dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
+            else:
+                if self.debugLevel >= 2:
+                    self.debugLog(u"no Storage result found.")
 
             update_time = t.strftime("%m/%d/%Y at %H:%M")
             dev.updateStateOnServer('deviceLastUpdated', value=update_time)
@@ -561,7 +598,7 @@ class Plugin(indigo.PluginBase):
             if self.debugLevel >= 1:
                 self.debugLog("State Image Selector:"+str(dev.displayStateImageSel))
 
-            if int(self.finalDict['production'][1]['wNow']) >= int(self.finalDict['consumption'][0]['wNow']) and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
+            if productionWatts >= consumptionWatts and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
                 #Generating more Power - and a change
                 # If Generating Power - but device believes importing - recent change unpdate to refleect
                 if self.debugLevel >= 2:
@@ -573,7 +610,7 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >= 1:
                     self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
 
-            if int(self.finalDict['production'][1]['wNow']) < int(self.finalDict['consumption'][0]['wNow']) and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
+            if productionWatts < consumptionWatts and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
                 #Must be opposite or and again a change only
                 if self.debugLevel >= 2:
                     self.debugLog(u'**CHANGED**: Importing power')
@@ -583,6 +620,7 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
                 if self.debugLevel >= 1:
                     self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+
         except Exception as error:
              if self.debugLevel >= 2:
                  self.errorLog(u"Saving Values errors:"+str(error.message))
