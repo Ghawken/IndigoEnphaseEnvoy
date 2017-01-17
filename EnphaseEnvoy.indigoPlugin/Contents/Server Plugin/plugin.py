@@ -532,6 +532,10 @@ class Plugin(indigo.PluginBase):
         The parseStateValues() method walks through the dict and assigns the
         corresponding value to each device state.
         """
+
+        #testdata = {u'production': [{u'activeCount': 32, u'wNow': 303, u'readingTime': 1484494980, u'type': u'inverters', u'whLifetime': 1799748.9794444444}, {u'whToday': 137.262, u'pwrFactor': 0.53, u'readingTime': 1484494980, u'activeCount': 1, u'rmsVoltage': 248.215, u'reactPwr': 490.766, u'whLifetime': 1321326.262, u'apprntPwr': 596.966, u'wNow': 316.044, u'type': u'eim', u'whLastSevenDays': 116064.262, u'rmsCurrent': 4.81}], u'consumption': [{u'varhLagLifetime': 913691.045, u'rmsVoltage': 248.132, u'pwrFactor': 0.35, u'whToday': 6075.567, u'vahToday': 8331.054, u'varhLeadLifetime': 912659.572, u'varhLeadToday': 4580.572, u'readingTime': 1484494980, u'activeCount': 1, u'varhLagToday': 4093.045, u'vahLifetime': 2530344.054, u'reactPwr': 402.82, u'whLifetime': 1756854.567, u'apprntPwr': 3780.981, u'wNow': 1337.481, u'type': u'eim', u'whLastSevenDays': 161357.567, u'rmsCurrent': 15.238}]}
+        #self.finalDict = testdata
+
         if self.debugLevel >= 2:
             self.debugLog(u"Saving Values method called.")
 
@@ -572,7 +576,7 @@ class Plugin(indigo.PluginBase):
                         self.debugLog(u'No netConsumption being reporting.....Calculating....')
                     # Calculate?
                     #
-                    netConsumption = int(self.finalDict['production'][1]['wNow']) - int (self.finalDict['consumption'][0]['wNow'])
+                    netConsumption = int(self.finalDict['consumption'][0]['wNow']) - int(self.finalDict['production'][1]['wNow'])
                     dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
             else:
                 if self.debugLevel >= 2:
@@ -587,6 +591,7 @@ class Plugin(indigo.PluginBase):
             else:
                 if self.debugLevel >= 2:
                     self.debugLog(u"no Storage result found.")
+                dev.updateStateOnServer('storageState', value='No Data')
 
             update_time = t.strftime("%m/%d/%Y at %H:%M")
             dev.updateStateOnServer('deviceLastUpdated', value=update_time)
