@@ -533,11 +533,23 @@ class Plugin(indigo.PluginBase):
         corresponding value to each device state.
         """
 
+        #testdata2 = {u'production': [{u'activeCount': 43, u'wNow': 1912, u'readingTime': 1493848912, u'type': u'inverters',u'whLifetime': 9422470.6777777784},
+        #                 {u'whToday': 51894.915000000001, u'pwrFactor': 0.93000000000000005, u'readingTime': 1493848913,u'activeCount': 1, u'rmsVoltage': 250.69399999999999, u'reactPwr': 541.96500000000003,
+        #                  u'whLifetime': 9352075.9149999991, u'apprntPwr': 1916.5229999999999,u'wNow': 1778.6320000000001, u'type': u'eim', u'whLastSevenDays': 326631.91499999998,
+         #                 u'rmsCurrent': 15.289999999999999}], u'consumption': [{u'varhLagLifetime': 0, u'rmsVoltage': 0, u'pwrFactor': 0, u'whToday': 0, u'vahToday': 0,
+        #     u'varhLeadLifetime': 0, u'varhLeadToday': 0, u'activeCount': 0, u'varhLagToday': 0, u'vahLifetime': 0,u'reactPwr': 0, u'whLifetime': 0, u'apprntPwr': 0, u'wNow': 0, u'type': u'eim', u'whLastSevenDays': 0,
+        #     u'rmsCurrent': 0}]}
+
+        #self.finalDict = testdata2
+
         #testdata = {u'production': [{u'activeCount': 32, u'wNow': 303, u'readingTime': 1484494980, u'type': u'inverters', u'whLifetime': 1799748.9794444444}, {u'whToday': 137.262, u'pwrFactor': 0.53, u'readingTime': 1484494980, u'activeCount': 1, u'rmsVoltage': 248.215, u'reactPwr': 490.766, u'whLifetime': 1321326.262, u'apprntPwr': 596.966, u'wNow': 316.044, u'type': u'eim', u'whLastSevenDays': 116064.262, u'rmsCurrent': 4.81}], u'consumption': [{u'varhLagLifetime': 913691.045, u'rmsVoltage': 248.132, u'pwrFactor': 0.35, u'whToday': 6075.567, u'vahToday': 8331.054, u'varhLeadLifetime': 912659.572, u'varhLeadToday': 4580.572, u'readingTime': 1484494980, u'activeCount': 1, u'varhLagToday': 4093.045, u'vahLifetime': 2530344.054, u'reactPwr': 402.82, u'whLifetime': 1756854.567, u'apprntPwr': 3780.981, u'wNow': 1337.481, u'type': u'eim', u'whLastSevenDays': 161357.567, u'rmsCurrent': 15.238}]}
         #self.finalDict = testdata
 
+
+
         if self.debugLevel >= 2:
             self.debugLog(u"Saving Values method called.")
+            self.debugLog(unicode(self.finalDict))
 
         try:
             consumptionWatts =0
