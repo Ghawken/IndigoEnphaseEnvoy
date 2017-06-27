@@ -599,7 +599,7 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateOnServer('storageActiveCount', value=int(self.finalDict['storage'][0]['activeCount']))
                 dev.updateStateOnServer('storageWattsNow', value=int(self.finalDict['storage'][0]['wNow']))
                 dev.updateStateOnServer('storageState', value=self.finalDict['storage'][0]['state'])
-                dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
+                #dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
             else:
                 if self.debugLevel >= 2:
                     self.debugLog(u"no Storage result found.")
