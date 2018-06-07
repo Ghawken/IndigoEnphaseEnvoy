@@ -362,6 +362,7 @@ class Plugin(indigo.PluginBase):
 
         if self.debugLevel >= 2:
             self.debugLog(u'check thepanels called')
+
         if dev.pluginProps['activatePanels']:
             self.thePanels = self.getthePanels(dev)
 
@@ -373,7 +374,6 @@ class Plugin(indigo.PluginBase):
                         deviceName = 'Enphase SolarPanel ' + str(x)
                         if dev.states['producing']:
                             dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']),uiValue=str(self.thePanels[x-1]['lastReportWatts']))
-
                         dev.updateStateOnServer('serialNo', value=float(self.thePanels[x - 1]['serialNumber']))
                         dev.updateStateOnServer('maxWatts', value=int(self.thePanels[x - 1]['maxReportWatts']))
                         dev.updateStateOnServer('deviceLastUpdated', value=update_time)
@@ -392,14 +392,11 @@ class Plugin(indigo.PluginBase):
         return
 
     def checkPanelInventory(self,dev):
-
         if self.debugLevel >= 2:
             self.debugLog(u"checkPanelInventory Enphase Panels method called.")
 
         if dev.pluginProps['activatePanels'] and dev.states['deviceIsOnline']:
-
             self.inventoryDict = self.getInventoryData(dev)
-
             try:
                 if self.inventoryDict is not None:
                     for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
@@ -411,8 +408,6 @@ class Plugin(indigo.PluginBase):
                             #self.errorLog(u'Dev.states Producing type is' + str(type(dev.states['producing'])))
                             #self.errorLog(u'Devices Producing type is' + str(type(devices['producing'])))
                             if int(dev.states['serialNo']) == int(devices['serial_num']):
-
-
                                 if dev.states['producing']==True and devices['producing']==False:
                                     if self.debugLevel >= 1:
                                         self.debugLog(u'Producing: States true, devices(producing) False: devices[prodcing] equals:'+str(devices['producing']))
@@ -651,12 +646,9 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u'generate Panels run')
         try:
             #delete all panel devices first up
-            for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
-                indigo.device.delete(dev.id)
-                if self.debugLevel >2:
-                    self.debugLog(u'Deleting Device'+unicode(dev.id))
 
             dev = indigo.devices[devId]
+
             if self.debugLevel>=2:
                 self.debugLog(u'Folder ID'+str(dev.folderId))
             self.thePanels = self.getthePanels(dev)
@@ -664,7 +656,12 @@ class Plugin(indigo.PluginBase):
                 x = 1
                 for array in self.thePanels:
                      deviceName = 'Enphase SolarPanel '+str(x)
-                     device = indigo.device.create(address=deviceName, deviceTypeId='EnphasePanelDevice',name=deviceName,protocol=indigo.kProtocol.Plugin, folder=dev.folderId)
+                     noDevice = True
+                     for panels in indigo.devices.itervalues('self.EnphasePanelDevice'):
+                         if panels.name == deviceName:
+                            noDevice = False
+                     if noDevice:
+                        device = indigo.device.create(address=deviceName, deviceTypeId='EnphasePanelDevice',name=deviceName,protocol=indigo.kProtocol.Plugin, folder=dev.folderId)
                      x=x+1
             #now fill with data
             self.sleep(2)
