@@ -323,6 +323,12 @@
         <TriggerLabel>Panel Communicating </TriggerLabel>
         <ControlPageLabel>Panel Communicating</ControlPageLabel>
       </State>
+        <State id="lastCommunication">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Date/Time Last Communication from Panel</TriggerLabel>
+        <ControlPageLabel>Date/time Last Communication from Panel</ControlPageLabel>
+      </State>
+
     </States>
 
     <UiDisplayStateId>watts</UiDisplayStateId>

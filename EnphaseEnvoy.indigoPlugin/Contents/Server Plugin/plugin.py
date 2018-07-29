@@ -106,6 +106,7 @@ class Plugin(indigo.PluginBase):
             #dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
             dev.updateStateOnServer('watts', value=0)
             dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+            dev.stateListOrDisplayStateIdChanged()
             return
         #number_Panels = 0
         #numer_Panels = indigo.devices.len(filter='self.EnphasePanelDevice')
@@ -113,6 +114,7 @@ class Plugin(indigo.PluginBase):
         dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
+        dev.stateListOrDisplayStateIdChanged()
 
 
 # Default Indigo Plugin StateList
@@ -374,6 +376,8 @@ class Plugin(indigo.PluginBase):
                         deviceName = 'Enphase SolarPanel ' + str(x)
                         if dev.states['producing']:
                             dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']),uiValue=str(self.thePanels[x-1]['lastReportWatts']))
+
+                        dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp( int(self.thePanels[x-1]['lastReportDate'])).strftime('%c')))
                         dev.updateStateOnServer('serialNo', value=float(self.thePanels[x - 1]['serialNumber']))
                         dev.updateStateOnServer('maxWatts', value=int(self.thePanels[x - 1]['maxReportWatts']))
                         dev.updateStateOnServer('deviceLastUpdated', value=update_time)
