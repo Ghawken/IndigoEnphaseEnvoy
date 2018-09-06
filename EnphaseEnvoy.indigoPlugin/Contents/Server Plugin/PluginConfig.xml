@@ -21,10 +21,11 @@
     <Label>Update Check Interval:(hours)</Label>
   </Field>
 
-  <Field id="configUpdaterForceUpdate" type="checkbox" tooltip="Will automatic install newer version at check.">
-    <Label> Automatically install newer version at time of check</Label>
+    <Field id="openStore" type="checkbox" tooltip="Will automatic install newer version at check.">
+    <Label> Open PluginStore if newer version at time of check</Label>
     <Description>Enable/Disable</Description>
   </Field>
+
  <Field id="sep9" type="separator"/>
 
   <Field id="space10" type="label" alignText="left">
@@ -41,7 +42,10 @@
     <Label> </Label>
     <Description>Enable/Disable</Description>
   </Field>
-
+    <Field id="debugupdate" type="checkbox" tooltip="Enabling will result Debugging Update.">
+        <Label/>
+        <Description>Debug Plugin Updating</Description>
+    </Field>
   <Field id="showDebugLevel" type="menu" defaultValue="Low" tooltip="Controls the amount of debug information written to the log.">
     <Label>Debug level:</Label>
     <Description>Enable/Disable</Description>

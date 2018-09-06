@@ -18,6 +18,7 @@ import shutil
 import json
 import httplib
 import plistlib
+import logging
 
 import ConfigParser
 
@@ -31,343 +32,334 @@ PluginInfo = namedtuple('PluginInfo', ['id', 'name', 'version'])
 ################################################################################
 class GitHubPluginUpdater(object):
 
-    #---------------------------------------------------------------------------
-    def __init__(self, plugin=None, configFile='ghpu.cfg'):
-        self.plugin = plugin
-
-        config = ConfigParser.RawConfigParser()
-        config.read(configFile)
-
-        self.repo = config.get('repository', 'name')
-        self.owner = config.get('repository', 'owner')
-
-        if (config.has_option('repository', 'path')):
-            self.path = config.get('repository', 'path')
-        else:
-            self.path = ''
-
-        # TODO error checking on configuration
-
-    #---------------------------------------------------------------------------
-    # install the latest version of the plugin represented by this updater
-    def install(self):
-        self._log('Installing plugin from %s/%s...' % (self.owner, self.repo))
-        latestRelease = self.getLatestRelease()
-
-        if (latestRelease == None):
-            self._error('No release available')
-            return False
-
-        try:
-            self._installRelease(latestRelease)
-        except Exception as e:
-            self._error(str(e))
-            return False
-
-        return True
-
-    #---------------------------------------------------------------------------
-    # updates the contained plugin if needed
-    def update(self, currentVersion=None):
-        update = self._prepareForUpdate(currentVersion)
-        if (update == None): return False
-
-        try:
-            self._installRelease(update)
-        except Exception as e:
-            self._error(str(e))
-            return False
-
-        return True
-
-    #---------------------------------------------------------------------------
-    # returns the URL for an update if there is one
-    def checkForUpdate(self, currentVersion=None):
-        update = self._prepareForUpdate(currentVersion)
-
-        return (update != None)
-
-    #---------------------------------------------------------------------------
-    # returns the update package, if there is one
-    def getUpdate(self, currentVersion):
-        self._debug('Current version is: %s' % currentVersion)
-
-        update = self.getLatestRelease()
-
-        if (update == None):
-            self._debug('No release available')
-            return None
-
-        # assume the tag is the release version
-        latestVersion = update['tag_name'].lstrip('v')
-        self._debug('Latest release is: %s' % latestVersion)
-        zipball = update.get('zipball_url', None)
-        assets = update.get('assets_url', None)
-        self._debug(unicode(zipball))
-        self._debug(unicode(assets))
-        #Check if prerelease and ignore - don' update
-
-        if (ver(currentVersion) >= ver(latestVersion)):
-            return None
-
-        return update
-
-    #---------------------------------------------------------------------------
-    # returns the latest release information from a given user / repo
-    # https://developer.github.com/v3/repos/releases/
-    def getLatestRelease(self):
-        self._debug('Getting latest release from %s/%s...' % (self.owner, self.repo))
-        return self._GET('/repos/' + self.owner + '/' + self.repo + '/releases/latest')
-
-    #---------------------------------------------------------------------------
-    # returns a tuple for the current rate limit: (limit, remaining, resetTime)
-    # https://developer.github.com/v3/rate_limit/
-    # NOTE this does not count against the current limit
-    def getRateLimit(self):
-        limiter = self._GET('/rate_limit')
-
-        remain = int(limiter['rate']['remaining'])
-        limit = int(limiter['rate']['limit'])
-        resetAt = int(limiter['rate']['reset'])
-
-        return (limit, remain, resetAt)
-
-    #---------------------------------------------------------------------------
-    # form a GET request to api.github.com and return the parsed JSON response
-    def _GET(self, requestPath):
-        self._debug('GET %s' % requestPath)
+	#---------------------------------------------------------------------------
+	def __init__(self, plugin=None, configFile='ghpu.cfg'):
+		self.plugin = plugin
+		self.logger = logging.getLogger("Plugin.ghpu")
 
-        headers = {
-            'User-Agent': 'Indigo-Plugin-Updater',
-            'Accept': 'application/vnd.github.v3+json'
-        }
+		config = ConfigParser.RawConfigParser()
+		config.read(configFile)
 
-        data = None
+		self.repo = config.get('repository', 'name')
+		self.owner = config.get('repository', 'owner')
 
-        conn = httplib.HTTPSConnection('api.github.com')
-        conn.request('GET', requestPath, None, headers)
+		if (config.has_option('repository', 'path')):
+			self.path = config.get('repository', 'path')
+		else:
+			self.path = ''
 
-        resp = conn.getresponse()
-        self._debug('HTTP %d %s' % (resp.status, resp.reason))
+		# TODO error checking on configuration
 
-        if (resp.status == 200):
-            data = json.loads(resp.read())
-        elif (400 <= resp.status < 500):
-            error = json.loads(resp.read())
-            self._error('%s' % error['message'])
-        else:
-            self._error('Error: %s' % resp.reason)
+	#---------------------------------------------------------------------------
+	# install the latest version of the plugin represented by this updater
+	def install(self):
+		self.logger.info('Installing plugin from %s/%s...' % (self.owner, self.repo))
+		latestRelease = self.getLatestRelease()
 
-        return data
-
-    #---------------------------------------------------------------------------
-    # prepare for an update
-    def _prepareForUpdate(self, currentVersion=None):
-        self._log('Checking for updates...')
-
-        # sort out the currentVersion based on user params
-        if ((currentVersion == None) and (self.plugin == None)):
-            self._error('Must provide either currentVersion or plugin reference')
-            return None
-        elif (currentVersion == None):
-            currentVersion = str(self.plugin.pluginVersion)
-            self._debug('Plugin version detected: %s' % currentVersion)
-        else:
-            self._debug('Plugin version provided: %s' % currentVersion)
-
-        update = self.getUpdate(currentVersion)
-
-        if (update == None):
-            self._log('No updates are available')
-            return None
-
-        self._error('A new version is available: %s' % update['html_url'])
-
-        return update
-
-    #---------------------------------------------------------------------------
-    # reads plugin info from the given pList
-    def _buildPluginInfo(self, plist):
-        pid = plist.get('CFBundleIdentifier', None)
-        pname = pluginName = plist.get('CFBundleDisplayName', None)
-        pver = pluginVersion = plist.get('PluginVersion', None)
-
-        return PluginInfo(id=pid, name=pname, version=pver)
-
-    #---------------------------------------------------------------------------
-    # reads the plugin info from the given path
-    def _readPluginInfoFromPath(self, path):
-        plistFile = os.path.join(path, 'Contents', 'Info.plist')
-        self._debug('Loading plugin info: %s' % plistFile)
-
-        plist = plistlib.readPlist(plistFile)
-
-        return self._buildPluginInfo(plist)
-
-    #---------------------------------------------------------------------------
-    # finds the plugin information in the zipfile
-    def _readPluginInfoFromArchive(self, zipfile):
-        topdir = zipfile.namelist()[0]
-
-        # read and the plugin info contained in the zipfile
-        plistFile = os.path.join(topdir, self.path, 'Contents', 'Info.plist')
-        self._debug('Reading plugin info: %s' % plistFile)
-
-        plistData = zipfile.read(plistFile)
-        if (plistData == None):
-            raise Exception('Unable to read new plugin info')
-
-        plist = plistlib.readPlistFromString(plistData)
-
-        return self._buildPluginInfo(plist)
-
-    #---------------------------------------------------------------------------
-    # verifies the provided plugin info matches what we expect
-    def _verifyPluginInfo(self, pInfo):
-        self._debug('Verifying plugin info: %s' % pInfo.id)
-
-        if (pInfo.id == None):
-            raise Exception('ID missing in source')
-        elif (pInfo.name == None):
-            raise Exception('Name missing in source')
-        elif (pInfo.version == None):
-            raise Exception('Version missing in soruce')
-
-        elif (self.plugin and (self.plugin.pluginId != pInfo.id)):
-            raise Exception('ID mismatch: %s' % pInfo.id)
-
-        self._debug('Verified plugin: %s' % pInfo.name)
-
-    #---------------------------------------------------------------------------
-    # install a given release
-    def _installRelease(self, release):
-        tmpdir = tempfile.gettempdir()
-        self._debug('Workspace: %s' % tmpdir)
-
-        # the zipfile is held in memory until we extract
-        zipfile = self._getZipFileFromRelease(release)
-        pInfo = self._readPluginInfoFromArchive(zipfile)
-
-        self._verifyPluginInfo(pInfo)
-
-        # the top level directory should be the first entry in the zipfile
-        # it is typically a combination of the owner, repo & release tag
-        repotag = zipfile.namelist()[0]
-
-        # this is where the repo files will end up after extraction
-        repoBaseDir = os.path.join(tmpdir, repotag)
-        self._debug('Destination directory: %s' % repoBaseDir)
-
-        if (os.path.exists(repoBaseDir)):
-            shutil.rmtree(repoBaseDir)
-
-        # this is where the plugin will be after extracting
-        newPluginPath = os.path.join(repoBaseDir, self.path)
-        self._debug('Plugin source path: %s' % newPluginPath)
-
-        # at this point, we should have been able to confirm the top-level directory
-        # based on reading the pluginId, we know the plugin in the zipfile matches our
-        # internal plugin reference (if we have one), temp directories are available
-        # and we know the package location for installing the plugin
-
-        self._debug('Extracting files...')
-        zipfile.extractall(tmpdir)
-
-        # now, make sure we got what we expected
-        if (not os.path.exists(repoBaseDir)):
-            raise Exception('Failed to extract plugin')
-
-        self._installPlugin(newPluginPath)
-        self._debug('Installation complete')
-
-    #---------------------------------------------------------------------------
-    # install plugin from the existing path
-    def _installPlugin(self, pluginPath):
-        tmpdir = tempfile.gettempdir()
-
-        pInfo = self._readPluginInfoFromPath(pluginPath)
-        self._verifyPluginInfo(pInfo)
-
-        # if the new plugin path does not end in .indigoPlugin, we need to do some
-        # path shuffling for 'open' to work properly
-        if (not pluginPath.endswith('.indigoPlugin')):
-            stagedPluginPath = os.path.join(tmpdir, '%s.indigoPlugin' % pInfo.name)
-            self._debug('Staging plugin: %s' % stagedPluginPath)
-
-            if (os.path.exists(stagedPluginPath)):
-                shutil.rmtree(stagedPluginPath)
-
-            os.rename(pluginPath, stagedPluginPath)
-            pluginPath = stagedPluginPath
-
-        self._debug('Installing %s' % pInfo.name)
-        subprocess.call(['open', pluginPath])
-
-    #---------------------------------------------------------------------------
-    # return the valid zipfile from the release, or raise an exception
-    def _getZipFileFromRelease(self, release):
-        # download and verify zipfile from the release package
-        zipball = release.get('zipball_url', None)
-        if (zipball == None):
-            raise Exception('Invalid release package: no zipball')
-        #self._error(unicode(zipball))
-        self._debug('Downloading zip file: %s' % zipball)
-
-        zipdata = urlopen(zipball).read()
-        zipfile = ZipFile(StringIO(zipdata))
-
-        self._debug('Verifying zip file (%d bytes)...' % len(zipdata))
-        if (zipfile.testzip() != None):
-            raise Exception('Download corrupted')
-
-        return zipfile
-
-    #---------------------------------------------------------------------------
-    # convenience method for log messages
-    def _log(self, msg):
-        # FIXME - this is a nasty hack, can't we pass the log call to a plugin method like debug and error?
-        try:
-            indigo.server.log(msg)
-        except:
-            print msg
-
-    #---------------------------------------------------------------------------
-    # convenience method for debug messages
-    def _debug(self, msg):
-        if self.plugin:
-            self.plugin.debugLog(msg)
-
-    #---------------------------------------------------------------------------
-    # convenience method for error messages
-    def _error(self, msg):
-        if self.plugin:
-            self.plugin.errorLog(msg)
+		if (latestRelease == None):
+			self.logger.error('No release available')
+			return False
+
+		try:
+			self._installRelease(latestRelease)
+		except Exception as e:
+			self.logger.exception(str(e))
+			return False
+
+		return True
+
+	#---------------------------------------------------------------------------
+	# updates the contained plugin if needed
+	def update(self, currentVersion=None):
+		update = self._prepareForUpdate(currentVersion)
+		if (update == None): return False
+
+		try:
+			self._installRelease(update)
+		except Exception as e:
+			self.logger.exception(str(e))
+			return False
+
+		return True
+
+	#---------------------------------------------------------------------------
+	# returns the URL for an update if there is one
+	def checkForUpdate(self, currentVersion=None):
+		update = self._prepareForUpdate(currentVersion)
+
+		return (update != None)
+
+	#---------------------------------------------------------------------------
+	# returns the update package, if there is one
+	def getUpdate(self, currentVersion):
+		self.logger.debug('Current version is: %s' % currentVersion)
+
+		update = self.getLatestRelease()
+
+		if (update == None):
+			self.logger.debug('No release available')
+			return None
+
+		# assume the tag is the release version
+		latestVersion = update['tag_name'].lstrip('v')
+		self.logger.debug('Latest release is: %s' % latestVersion)
+		if (ver(currentVersion) >= ver(latestVersion)):
+			return None
+		return update
+
+	def getUpdateAlways(self, currentVersion):
+		self.logger.debug('Current version is: %s' % currentVersion)
+
+		update = self.getLatestRelease()
+
+		if (update == None):
+			self.logger.debug('No release available')
+			return None
+
+		# assume the tag is the release version
+		latestVersion = update['tag_name'].lstrip('v')
+		self.logger.debug('Latest release is: %s' % latestVersion)
+
+		return update
+# Modification to get versions and then take to plugin Store via True/False
+
+	def getLatestVersion(self):
+
+		currentVersion = str(self.plugin.pluginVersion)
+
+		self.logger.info('Enphase Update: Update Checking. Your Current version is: %s' % currentVersion)
+
+		update = self.getUpdateAlways(currentVersion)
+
+		if (update == None):
+			self.logger.info('Enphase Update: Update Checking. No release available')
+			return False
+		# assume the tag is the release version
+		latestVersion = update['tag_name'].lstrip('v')
+
+		self.logger.info('Enphase: Update Checking. The Github Latest release is: %s' % latestVersion)
+		if (ver(currentVersion) >= ver(latestVersion)):
+			self.logger.info(u'Enphase: Update Checking. You already have the lastest release.  No update needed.')
+			return False
+		if (ver(currentVersion) < ver(latestVersion)):
+			self.logger.info(u'Enphase: Update Checking. Please visit the Plugin Store to Download')
+			return True
+
+		return False
+
+	#---------------------------------------------------------------------------
+	# returns the latest release information from a given user / repo
+	# https://developer.github.com/v3/repos/releases/
+	def getLatestRelease(self):
+		self.logger.debug('Getting latest release from %s/%s...' % (self.owner, self.repo))
+		return self._GET('/repos/' + self.owner + '/' + self.repo + '/releases/latest')
+
+	#---------------------------------------------------------------------------
+	# returns a tuple for the current rate limit: (limit, remaining, resetTime)
+	# https://developer.github.com/v3/rate_limit/
+	# NOTE this does not count against the current limit
+	def getRateLimit(self):
+		limiter = self._GET('/rate_limit')
+		remain = int(limiter['rate']['remaining'])
+		limit = int(limiter['rate']['limit'])
+		resetAt = int(limiter['rate']['reset'])
+
+		return (limit, remain, resetAt)
+
+	#---------------------------------------------------------------------------
+	# form a GET request to api.github.com and return the parsed JSON response
+	def _GET(self, requestPath):
+		self.logger.debug('GET %s' % requestPath)
+		headers = {
+			'User-Agent': 'Indigo-Plugin-Updater',
+			'Accept': 'application/vnd.github.v3+json'
+		}
+		data = None
+		requestPath = 'https://api.github.com'+ requestPath
+		#conn = httplib.HTTPSConnection('api.github.com')
+		#conn.request('GET', requestPath, None, headers)
+		#resp = conn.getresponse()
+		f = subprocess.Popen(["curl",  requestPath], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+	#'-H', str(headers), "-k",
+		out, err = f.communicate()
+		if self.plugin.debugupdate:
+			self.logger.debug(u'HTTP Err result:'+unicode(err) )
+			self.logger.debug(u'ReturnCode:{0}'.format(unicode(f.returncode)))
+
+		if (int(f.returncode) == 0):
+			data = json.loads(out)
+			if self.plugin.debugupdate:
+				self.logger.debug(u'Json results:'+unicode(data))
+		elif (400 <= f.status < 500):
+			error = json.loads(out)
+			self.logger.error('%s' % error['message'])
+		else:
+			self.logger.error('Error: %s' % unicode(err))
+
+		return data
+
+	#---------------------------------------------------------------------------
+	# prepare for an update
+	def _prepareForUpdate(self, currentVersion=None):
+		self.logger.info('Checking for updates...')
+
+		# sort out the currentVersion based on user params
+		if ((currentVersion == None) and (self.plugin == None)):
+			self.logger.error('Must provide either currentVersion or plugin reference')
+			return None
+		elif (currentVersion == None):
+			currentVersion = str(self.plugin.pluginVersion)
+			self.logger.debug('Plugin version detected: %s' % currentVersion)
+		else:
+			self.logger.debug('Plugin version provided: %s' % currentVersion)
+
+		update = self.getUpdate(currentVersion)
+
+		if (update == None):
+			self.logger.info('No updates are available')
+			return None
+
+		self.logger.warning('A new version is available: %s' % update['html_url'])
+
+		return update
+
+	#---------------------------------------------------------------------------
+	# reads plugin info from the given pList
+	def _buildPluginInfo(self, plist):
+		pid = plist.get('CFBundleIdentifier', None)
+		pname = pluginName = plist.get('CFBundleDisplayName', None)
+		pver = pluginVersion = plist.get('PluginVersion', None)
+
+		return PluginInfo(id=pid, name=pname, version=pver)
+
+	#---------------------------------------------------------------------------
+	# reads the plugin info from the given path
+	def _readPluginInfoFromPath(self, path):
+		plistFile = os.path.join(path, 'Contents', 'Info.plist')
+		self.logger.debug('Loading plugin info: %s' % plistFile)
+
+		plist = plistlib.readPlist(plistFile)
+
+		return self._buildPluginInfo(plist)
+
+	#---------------------------------------------------------------------------
+	# finds the plugin information in the zipfile
+	def _readPluginInfoFromArchive(self, zipfile):
+		topdir = zipfile.namelist()[0]
+
+		# read and the plugin info contained in the zipfile
+		plistFile = os.path.join(topdir, self.path, 'Contents', 'Info.plist')
+		self.logger.debug('Reading plugin info: %s' % plistFile)
+
+		plistData = zipfile.read(plistFile)
+		if (plistData == None):
+			raise Exception('Unable to read new plugin info')
+
+		plist = plistlib.readPlistFromString(plistData)
+
+		return self._buildPluginInfo(plist)
+
+	#---------------------------------------------------------------------------
+	# verifies the provided plugin info matches what we expect
+	def _verifyPluginInfo(self, pInfo):
+		self.logger.debug('Verifying plugin info: %s' % pInfo.id)
+
+		if (pInfo.id == None):
+			raise Exception('ID missing in source')
+		elif (pInfo.name == None):
+			raise Exception('Name missing in source')
+		elif (pInfo.version == None):
+			raise Exception('Version missing in soruce')
+
+		elif (self.plugin and (self.plugin.pluginId != pInfo.id)):
+			raise Exception('ID mismatch: %s' % pInfo.id)
+
+		self.logger.debug('Verified plugin: %s' % pInfo.name)
+
+	#---------------------------------------------------------------------------
+	# install a given release
+	def _installRelease(self, release):
+		tmpdir = tempfile.gettempdir()
+		self.logger.debug('Workspace: %s' % tmpdir)
+
+		# the zipfile is held in memory until we extract
+		zipfile = self._getZipFileFromRelease(release)
+		pInfo = self._readPluginInfoFromArchive(zipfile)
+
+		self._verifyPluginInfo(pInfo)
+
+		# the top level directory should be the first entry in the zipfile
+		# it is typically a combination of the owner, repo & release tag
+		repotag = zipfile.namelist()[0]
+
+		# this is where the repo files will end up after extraction
+		repoBaseDir = os.path.join(tmpdir, repotag)
+		self.logger.debug('Destination directory: %s' % repoBaseDir)
+
+		if (os.path.exists(repoBaseDir)):
+			shutil.rmtree(repoBaseDir)
+
+		# this is where the plugin will be after extracting
+		newPluginPath = os.path.join(repoBaseDir, self.path)
+		self.logger.debug('Plugin source path: %s' % newPluginPath)
+
+		# at this point, we should have been able to confirm the top-level directory
+		# based on reading the pluginId, we know the plugin in the zipfile matches our
+		# internal plugin reference (if we have one), temp directories are available
+		# and we know the package location for installing the plugin
+
+		self.logger.debug('Extracting files...')
+		zipfile.extractall(tmpdir)
+
+		# now, make sure we got what we expected
+		if (not os.path.exists(repoBaseDir)):
+			raise Exception('Failed to extract plugin')
+
+		self._installPlugin(newPluginPath)
+		self.logger.debug('Installation complete')
+
+	#---------------------------------------------------------------------------
+	# install plugin from the existing path
+	def _installPlugin(self, pluginPath):
+		tmpdir = tempfile.gettempdir()
+
+		pInfo = self._readPluginInfoFromPath(pluginPath)
+		self._verifyPluginInfo(pInfo)
+
+		# if the new plugin path does not end in .indigoPlugin, we need to do some
+		# path shuffling for 'open' to work properly
+		if (not pluginPath.endswith('.indigoPlugin')):
+			stagedPluginPath = os.path.join(tmpdir, '%s.indigoPlugin' % pInfo.name)
+			self.logger.debug('Staging plugin: %s' % stagedPluginPath)
+
+			if (os.path.exists(stagedPluginPath)):
+				shutil.rmtree(stagedPluginPath)
+
+			os.rename(pluginPath, stagedPluginPath)
+			pluginPath = stagedPluginPath
+
+		self.logger.debug('Installing %s' % pInfo.name)
+		subprocess.call(['open', pluginPath])
+
+	#---------------------------------------------------------------------------
+	# return the valid zipfile from the release, or raise an exception
+	def _getZipFileFromRelease(self, release):
+		# download and verify zipfile from the release package
+		zipball = release.get('zipball_url', None)
+		if (zipball == None):
+			raise Exception('Invalid release package: no zipball')
+
+		self.logger.debug('Downloading zip file: %s' % zipball)
+
+		zipdata = urlopen(zipball).read()
+		zipfile = ZipFile(StringIO(zipdata))
+
+		self.logger.debug('Verifying zip file (%d bytes)...' % len(zipdata))
+		if (zipfile.testzip() != None):
+			raise Exception('Download corrupted')
+
+		return zipfile
 
 ################################################################################
 # maps the standard version string as a tuple for comparrison
 def ver(vstr): return tuple(map(int, (vstr.split('.'))))
-
-################################################################################
-## stub plugin class for testing
-class TestPluginStub(object):
-
-    #---------------------------------------------------------------------------
-    def __init__(self, version='0'):
-        self.pluginId = 'com.heddings.indigo.ghpu'
-        self.pluginName = 'Plugin Stub'
-        self.pluginVersion = version
-
-    #---------------------------------------------------------------------------
-    # expected logging methods
-    def log(self, msg): print '%s' % msg
-    def debugLog(self, msg): print '[DEBUG] %s' % msg
-    def errorLog(self, msg): print '[ERROR] %s' % msg
-
-################################################################################
-## TEST ENTRY
-if __name__ == "__main__":
-    plugin = TestPluginStub()
-
-    updater = GitHubPluginUpdater(plugin=plugin)
-    updater.update()
-

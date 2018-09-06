@@ -52,6 +52,8 @@ class Plugin(indigo.PluginBase):
         self.updater = GitHubPluginUpdater(self)
         self.configUpdaterInterval = self.pluginPrefs.get('configUpdaterInterval', 24)
         self.configUpdaterForceUpdate = self.pluginPrefs.get('configUpdaterForceUpdate', False)
+        self.debugupdate = self.pluginPrefs.get('debugupdate', False)
+        self.openStore = self.pluginPrefs.get('openStore', False)
 
         # Convert old debugLevel scale to new scale if needed.
         # =============================================================
@@ -79,6 +81,8 @@ class Plugin(indigo.PluginBase):
             self.debug = valuesDict.get('showDebugInfo', False)
             self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
             self.debugLog(u"User prefs saved.")
+            self.debugupdate = valuesDict.get('debugupdate', False)
+            self.openStore = valuesDict.get('openStore', False)
 
             if self.debug:
                 indigo.server.log(u"Debugging on (Level: {0})".format(self.debugLevel))
@@ -207,11 +211,35 @@ class Plugin(indigo.PluginBase):
         self.updater.update(currentVersion='0.0.0')
 
     def checkForUpdates(self):
-        if self.updater.checkForUpdate() == False:
-            indigo.server.log(u"No Updates are Available")
 
+        updateavailable = self.updater.getLatestVersion()
+        if updateavailable and self.openStore:
+            self.logger.info(u'Enphase Plugin: Update Checking.  Update is Available.  Taking you to plugin Store. ')
+            self.sleep(2)
+            self.pluginstoreUpdate()
+        elif updateavailable and not self.openStore:
+            self.errorLog(u'Enphase Plugin: Update Checking.  Update is Available.  Please check Store for details/download.')
     def updatePlugin(self):
         self.updater.update()
+
+    def pluginstoreUpdate(self):
+        iurl = 'http://www.indigodomo.com/pluginstore/105/'
+        self.browserOpen(iurl)
+
+    def refreshDatafromMenu(self):
+        indigo.server.log(u'Manually Refreshing Enphase Data:')
+        for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
+            if self.debugLevel >= 2:
+                self.debugLog(u'Quick Checks Before Loop')
+            if dev.enabled:
+                self.refreshDataForDev(dev)
+                self.sleep(30)
+                self.checkPanelInventory(dev)
+                self.sleep(30)
+                self.checkThePanels(dev)
+                self.sleep(10)
+        return
+
 
     def runConcurrentThread(self):
 
@@ -275,11 +303,7 @@ class Plugin(indigo.PluginBase):
 
         # See if there is a plugin update and whether the user wants to be notified.
         try:
-            if self.configUpdaterForceUpdate:
-                self.updatePlugin()
-
-            else:
-                self.checkForUpdates()
+            self.checkForUpdates()
             self.sleep(1)
         except Exception as error:
             self.errorLog(u"Update checker error: {0}".format(error))
@@ -317,7 +341,7 @@ class Plugin(indigo.PluginBase):
 
         except Exception as error:
 
-            indigo.server.log(u"Error connecting to Device:" + unicode(dev.name) +"Error is:"+unicode(error.message))
+            indigo.server.log(u"Error connecting to Device:" + unicode(dev.name) +" Error is:"+unicode(error.message))
             self.WaitInterval = 60
             if self.debugLevel >= 2:
                 self.debugLog(u"Device is offline. No data to return. ")
