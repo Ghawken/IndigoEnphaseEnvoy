@@ -210,11 +210,6 @@
         <Label>To Enable per Panel Data Access</Label>
       </Field>
  <Field id="sep4" type="separator"/>
-
-
-
-
-
 <!-- Substitution -->
 
 </ConfigUI>
@@ -249,28 +244,17 @@
         <TriggerLabel>Power Production Lifetime(watts)</TriggerLabel>
         <ControlPageLabel>Power Production Lifetime (watts)</ControlPageLabel>
       </State>
-
-
-
      <State id="wattHoursSevenDays">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power Production 7 days(watts)</TriggerLabel>
         <ControlPageLabel>Power Production 7 days (watts)</ControlPageLabel>
       </State>
 
-
-
-
-
     </States>
 
     <UiDisplayStateId>powerStatus</UiDisplayStateId>
 
   </Device>
-
-
-
-
 
   <Device type="custom" id="EnphasePanelDevice">
     <Name>Enphase Panel</Name>
@@ -334,4 +318,81 @@
     <UiDisplayStateId>watts</UiDisplayStateId>
 
   </Device>
+
+    <Device type="custom" id="EnphaseEnvoyCostDevice">
+    <Name>Enphase Cost Device</Name>
+
+    <ConfigUI>
+      <Field id="envoyTariffkWh" type="textfield">
+        <Label>All day Tariff $/kWh</Label>
+      </Field>
+    </ConfigUI>
+    <States>
+      <State id="deviceIsOnline">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Device online?</TriggerLabel>
+        <ControlPageLabel>Device online?</ControlPageLabel>
+      </State>
+      <State id="deviceLastUpdated">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Device Last Updated</TriggerLabel>
+        <ControlPageLabel>Device Last Updated</ControlPageLabel>
+           </State>
+     <State id="productionkWToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Today (kWwatts)</TriggerLabel>
+        <ControlPageLabel>Power Production Today(kWatts)</ControlPageLabel>
+      </State>
+      <State id="consumptionkWToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power consumption Today (kWatts)</TriggerLabel>
+        <ControlPageLabel>Power consumption Today (kWatts)</ControlPageLabel>
+      </State>
+     <State id="productionkW7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production 7 days(kWatts)</TriggerLabel>
+        <ControlPageLabel>Power Production 7 days (kWatts)</ControlPageLabel>
+      </State>
+     <State id="consumptionkW7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Consumption 7 days(kWwatts)</TriggerLabel>
+        <ControlPageLabel>Power Consumption 7 days (kWatts)</ControlPageLabel>
+      </State>
+
+        <State id="productionTarrifToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Today (Tariff $)</TriggerLabel>
+        <ControlPageLabel>Power Production Today(Tariff $)</ControlPageLabel>
+      </State>
+      <State id="consumptionTarrifToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power consumption Today (Tariff $)</TriggerLabel>
+        <ControlPageLabel>Power consumption Today (Tariff $)</ControlPageLabel>
+      </State>
+     <State id="productionTarrif7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production 7 days(Tariff $)</TriggerLabel>
+        <ControlPageLabel>Power Production 7 days (Tariff $)</ControlPageLabel>
+      </State>
+     <State id="consumptionTarrif7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Consumption 7 days(Tarrif $)</TriggerLabel>
+        <ControlPageLabel>Power Consumption 7 days (Tarrif $)</ControlPageLabel>
+      </State>
+      <State id="netTarrifToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Net Today (Tariff $)</TriggerLabel>
+        <ControlPageLabel>Net Today (Tariff $)</ControlPageLabel>
+      </State>
+     <State id="netTarrif7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Net 7 days(Tarrif $)</TriggerLabel>
+        <ControlPageLabel>Net 7 days (Tarrif $)</ControlPageLabel>
+      </State>
+    </States>
+
+    <UiDisplayStateId>netTarrifToday</UiDisplayStateId>
+
+  </Device>
+
 </Devices>
