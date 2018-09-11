@@ -660,10 +660,56 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
                 if self.debugLevel >= 1:
                     self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+        # add Cost check device here
+
+            for costdev in indigo.devices.itervalues('self.EnphaseEnvoyCostDevice'):
+                if self.debugLevel >2:
+                    self.debugLog(u'Updating Cost Device')
+                self.updateCostDevice(dev, costdev)
 
         except Exception as error:
              if self.debugLevel >= 2:
                  self.errorLog(u"Saving Values errors:"+str(error.message))
+
+    def updateCostDevice(self, dev, costdev):
+        if self.debugLevel>=2:
+            self.debugLog(u'updateCostDevice Run')
+        # get current Tarrif
+        try:
+            tariffkwh = float(costdev.pluginProps['envoyTariffkWh'])
+        except Exception as error:
+            if self.debugLevel>=2:
+                self.debugLog(u'error with Tarriff kwh using 1.0:' +error.message   )
+            tariffkwh = 1.0
+
+
+        productionTarrifToday = float(dev.states['productionWattsToday']/1000 )
+        costdev.updateStateOnServer('productionTarrifToday', value='${:,.2f}'.format(productionTarrifToday * tariffkwh))
+        costdev.updateStateOnServer('productionkWToday',value=float(dev.states['productionWattsToday']))
+
+        consumptionTarrifToday = float(dev.states['consumptionWattsToday']/1000 )
+        costdev.updateStateOnServer('consumptionTarrifToday', value='${:,.2f}'.format(consumptionTarrifToday * tariffkwh))
+        costdev.updateStateOnServer('consumptionkWToday', value=float(dev.states['consumptionWattsToday']))
+
+        productionTarrif7days = float(dev.states['production7days']/1000 )
+        costdev.updateStateOnServer('productionTarrif7days', value='${:,.2f}'.format(productionTarrif7days * tariffkwh))
+        costdev.updateStateOnServer('productionkW7days', value=float(dev.states['production7days']))
+
+        consumptionTarrif7days = float(dev.states['consumption7days']/1000 )
+        costdev.updateStateOnServer('consumptionTarrif7days', value='${:,.2f}'.format(consumptionTarrif7days * tariffkwh))
+        costdev.updateStateOnServer('consumptionkW7days', value=float(dev.states['consumption7days']/1000))
+
+        netTarrif7days = float (productionTarrif7days - consumptionTarrif7days)
+        netTarrifToday = float (productionTarrifToday - consumptionTarrifToday)
+        costdev.updateStateOnServer('netTarrifToday',                    value='${:,.2f}'.format(netTarrifToday * tariffkwh))
+        costdev.updateStateOnServer('netTarrif7days', value='${:,.2f}'.format(netTarrif7days * tariffkwh))
+
+
+        update_time = t.strftime("%m/%d/%Y at %H:%M")
+        costdev.updateStateOnServer('deviceLastUpdated', value=update_time)
+
+        return
+
 
     def setStatestonil(self, dev):
         if self.debugLevel >= 2:
