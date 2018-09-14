@@ -190,6 +190,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('storageWattsNow', value=0)
             dev.updateStateOnServer('storageState', value='Offline')
             dev.updateStateOnServer('storagePercentFull', value=0)
+            dev.updateStateOnServer('whLifetime', value=0)
             dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
         if dev.model == 'Enphase Panel':
             dev.updateStateOnServer('watts', value=0)
@@ -581,11 +582,13 @@ class Plugin(indigo.PluginBase):
             # Check that finalDict contains a production list
             if check:
                 dev.updateStateOnServer('numberInverters', value=int(self.finalDict['production'][0]['activeCount']))
+
                 if len(self.finalDict['production'])>1:
                     dev.updateStateOnServer('productionWattsNow', value=int(self.finalDict['production'][1]['wNow']))
                     productionWatts = int(self.finalDict['production'][1]['wNow'])
                     dev.updateStateOnServer('production7days', value=int(self.finalDict['production'][1]['whLastSevenDays']))
                     dev.updateStateOnServer('productionWattsToday', value=int(self.finalDict['production'][1]['whToday']))
+                    dev.updateStateOnServer('productionwhLifetime', value=int(self.finalDict['production'][1]['whLifetime']))
                 else:
                     if self.debugLevel >= 2:
                         self.debugLog(u"no Production 2 result found.")
@@ -603,9 +606,12 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateOnServer('consumptionWattsNow', value=int(self.finalDict['consumption'][0]['wNow']))
                 consumptionWatts = int(self.finalDict['consumption'][0]['wNow'])
                 dev.updateStateOnServer('consumption7days', value=int(self.finalDict['consumption'][0]['whLastSevenDays']))
+                dev.updateStateOnServer('consumptionwhLifetime',  value=int(self.finalDict['consumption'][0]['whLifetime']))
                 dev.updateStateOnServer('consumptionWattsToday', value=int(self.finalDict['consumption'][0]['whToday']))
                 if len(self.finalDict['consumption'])>1:
                     dev.updateStateOnServer('netConsumptionWattsNow', value=int(self.finalDict['consumption'][1]['wNow']))
+                    dev.updateStateOnServer('netconsumptionwhLifetime',
+                                            value=int(self.finalDict['consumption'][1]['whLifetime']))
                 else:
                     if self.debugLevel >=2:
                         self.debugLog(u'No netConsumption being reporting.....Calculating....')
@@ -635,8 +641,8 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('readingTime', value=str(reading_time))
             timeDifference = int(t.time() - t.mktime(reading_time.timetuple()))
             dev.updateStateOnServer('secsSinceReading', value=timeDifference)
-            if self.debugLevel >= 1:
-                self.debugLog("State Image Selector:"+str(dev.displayStateImageSel))
+            if self.debugLevel >= 2:
+                self.debugLog(u"State Image Selector:"+unicode(dev.displayStateImageSel))
 
             if productionWatts >= consumptionWatts and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
                 #Generating more Power - and a change
@@ -647,7 +653,7 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
                 dev.updateStateOnServer('generatingPower', value=True)
                 dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
-                if self.debugLevel >= 1:
+                if self.debugLevel >= 2:
                     self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
 
             if productionWatts < consumptionWatts and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
@@ -658,8 +664,8 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
                 dev.updateStateOnServer('generatingPower', value=False)
                 dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
-                if self.debugLevel >= 1:
-                    self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+                if self.debugLevel >= 2:
+                    self.debugLog(u"State Image Selector:" + unicode(dev.displayStateImageSel))
         # add Cost check device here
 
             for costdev in indigo.devices.itervalues('self.EnphaseEnvoyCostDevice'):
@@ -669,7 +675,7 @@ class Plugin(indigo.PluginBase):
 
         except Exception as error:
              if self.debugLevel >= 2:
-                 self.errorLog(u"Saving Values errors:"+str(error.message))
+                 self.errorLog(u"Saving Values errors:"+unicode(error.message) + unicode(error) )
 
     def updateCostDevice(self, dev, costdev):
         if self.debugLevel>=2:
@@ -680,7 +686,7 @@ class Plugin(indigo.PluginBase):
             tariffkwhproduction = float(costdev.pluginProps['envoyTariffkWhProduction'])
         except Exception as error:
             if self.debugLevel>=2:
-                self.debugLog(u'error with Tarriff kwh using 1.0:' +error.message   )
+                self.debugLog(u'error with Tarriff kwh,please update device settings. Defaulting to $1.0/kwh:' +error.message   )
             tariffkwhproduction = 1.0
             tariffkwhconsumption = 1.0
 
@@ -704,6 +710,22 @@ class Plugin(indigo.PluginBase):
             consumptionTarrif7days = float(consumptionkwh7days * tariffkwhconsumption)
             costdev.updateStateOnServer('consumptionTarrif7days', value='${:,.2f}'.format(consumptionTarrif7days))
             costdev.updateStateOnServer('consumptionkW7days', value=float(dev.states['consumption7days']/1000))
+
+            productionkwhLifetime = float(dev.states['productionwhLifetime']/1000 )
+            productionTarrifLifetime = float(productionkwhLifetime * tariffkwhproduction)
+            costdev.updateStateOnServer('productionTarrifLifetime', value='${:,.2f}'.format(productionTarrifLifetime))
+            costdev.updateStateOnServer('productionkwhLifetime',value=float(productionkwhLifetime))
+
+            consumptionkwhLifetime = float(dev.states['consumptionwhLifetime']/1000 )
+            consumptionTarrifLifetime = float(consumptionkwhLifetime * tariffkwhconsumption)
+            costdev.updateStateOnServer('consumptionTarrifLifetime', value='${:,.2f}'.format(consumptionTarrifLifetime))
+            costdev.updateStateOnServer('consumptionkwhLifetime', value=float(consumptionkwhLifetime))
+
+            netconsumptionkwhLifetime = float(dev.states['netconsumptionwhLifetime'] / 1000)
+            netconsumptionTarrifLifetime = float(netconsumptionkwhLifetime * tariffkwhconsumption)
+            costdev.updateStateOnServer('netconsumptionTarrifLifetime', value='${:,.2f}'.format(netconsumptionTarrifLifetime))
+            costdev.updateStateOnServer('netconsumptionkwhLifetime', value=float(netconsumptionkwhLifetime))
+
             # change to cost.
             netTarrif7days = float (productionTarrif7days - consumptionTarrif7days)
             netTarrifToday = float (productionTarrifToday - consumptionTarrifToday)
@@ -721,7 +743,7 @@ class Plugin(indigo.PluginBase):
             return
 
         except Exception as error:
-            self.debugLog(u'Exception within Cost Device Calculation:'+error)
+            self.logger.exception(u'Exception within Cost Device Calculation:'+unicode(error))
             return
 
 
@@ -822,7 +844,7 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >= 2:
                     self.debugLog(u"   {0} is enabled.".format(dev.name))
                 timeDifference = int(t.time() - t.mktime(dev.lastChanged.timetuple()))
-                if self.debugLevel >= 1:
+                if self.debugLevel >= 2:
                     self.debugLog(dev.name + u": Time Since Device Update = " + unicode(timeDifference))
                     # self.errorLog(unicode(dev.lastChanged))
                 # Get the data.
@@ -854,7 +876,7 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >= 2:
                     self.debugLog(u"   {0} is enabled.".format(dev.name))
                 timeDifference = int(t.time() - t.mktime(dev.lastChanged.timetuple()))
-                if self.debugLevel >= 1:
+                if self.debugLevel >= 2:
                     self.debugLog(dev.name + u": Time Since Device Update = " + unicode(timeDifference))
                     # self.errorLog(unicode(dev.lastChanged))
                 # Get the data.
