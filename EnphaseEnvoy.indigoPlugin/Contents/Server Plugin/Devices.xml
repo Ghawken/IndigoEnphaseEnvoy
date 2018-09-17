@@ -149,8 +149,21 @@
         <TriggerLabel>Generating Power True or False</TriggerLabel>
         <ControlPageLabel>Generating Power True or False</ControlPageLabel>
       </State>
-
-
+      <State id="productionwhLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Watt Hours Lifetime</TriggerLabel>
+        <ControlPageLabel>Production Watt Hours Lifetime</ControlPageLabel>
+      </State>
+      <State id="consumptionwhLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Watt Hours Lifetime</TriggerLabel>
+        <ControlPageLabel>Consumption Watt Hours Lifetime</ControlPageLabel>
+      </State>
+              <State id="netconsumptionwhLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Net consumption Watt Hours Lifetime</TriggerLabel>
+        <ControlPageLabel>Net consumption Watt Hours Lifetime</ControlPageLabel>
+      </State>
       <State id="storageActiveCount">
         <ValueType>Number</ValueType>
         <TriggerLabel>Storage Number Active</TriggerLabel>
@@ -323,9 +336,13 @@
     <Name>Enphase Cost Device</Name>
 
     <ConfigUI>
-      <Field id="envoyTariffkWh" type="textfield">
-        <Label>All day Tariff $/kWh</Label>
+      <Field id="envoyTariffkWhConsumption" type="textfield">
+        <Label>All day Consumption Tariff $/kWh</Label>
       </Field>
+        <Field id="envoyTariffkWhProduction" type="textfield">
+        <Label>All day Production Tariff $/kWh</Label>
+      </Field>
+
     </ConfigUI>
     <States>
       <State id="deviceIsOnline">
@@ -343,7 +360,48 @@
         <TriggerLabel>Power Production Today (kWwatts)</TriggerLabel>
         <ControlPageLabel>Power Production Today(kWatts)</ControlPageLabel>
       </State>
-      <State id="consumptionkWToday">
+            <State id="netkWToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Net Power kwh Today</TriggerLabel>
+        <ControlPageLabel>Net Power kwh Today</ControlPageLabel>
+      </State>
+        <State id="productionkwhLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production kWatt Hours Lifetime</TriggerLabel>
+        <ControlPageLabel>Production kWatt Hours Lifetime</ControlPageLabel>
+      </State>
+        <State id="productionTarrifLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Tarrif Lifetime</TriggerLabel>
+        <ControlPageLabel>Production Tarrif Lifetime</ControlPageLabel>
+      </State>
+        <State id="consumptionkwhLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption kWatt Hours Lifetime</TriggerLabel>
+        <ControlPageLabel>Consumption kWatt Hours Lifetime</ControlPageLabel>
+      </State>
+        <State id="consumptionTarrifLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Tarrif Lifetime</TriggerLabel>
+        <ControlPageLabel>Consumption Tarrif Lifetime</ControlPageLabel>
+      </State>
+        <State id="netconsumptionkwhLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Net Consumption kWatt Hours Lifetime</TriggerLabel>
+        <ControlPageLabel>Net Consumption kWatt Hours Lifetime</ControlPageLabel>
+      </State>
+        <State id="netconsumptionTarrifLifetime">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>NetConsumption Tarrif Lifetime</TriggerLabel>
+        <ControlPageLabel>NetConsumption Tarrif Lifetime</ControlPageLabel>
+      </State>
+     <State id="netkW7days">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Net Power 7 days(kWatts)</TriggerLabel>
+        <ControlPageLabel>Net Power 7 days (kWatts)</ControlPageLabel>
+      </State>
+
+        <State id="consumptionkWToday">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power consumption Today (kWatts)</TriggerLabel>
         <ControlPageLabel>Power consumption Today (kWatts)</ControlPageLabel>

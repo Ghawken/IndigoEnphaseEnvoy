@@ -54,6 +54,7 @@ class Plugin(indigo.PluginBase):
         self.configUpdaterForceUpdate = self.pluginPrefs.get('configUpdaterForceUpdate', False)
         self.debugupdate = self.pluginPrefs.get('debugupdate', False)
         self.openStore = self.pluginPrefs.get('openStore', False)
+        self.WaitInterval = 0
 
         # Convert old debugLevel scale to new scale if needed.
         # =============================================================
@@ -269,14 +270,14 @@ class Plugin(indigo.PluginBase):
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
                     if self.debugLevel >= 2:
                         self.debugLog(u"MainLoop:  {0}:".format(dev.name))
-                    if dev.enabled:
+                    if dev.enabled and self.WaitInterval <=0:
                         self.refreshDataForDev(dev)
                         self.sleep(1)
-                        if x>=5:
+                        if x>=5 and self.WaitInterval <=0:
                             self.checkThePanels(dev)
                             self.sleep(5)
                             x=0
-                        if y>=8:
+                        if y>=8 and self.WaitInterval <=0:
                             self.checkPanelInventory(dev)
                             self.sleep(5)
                             y=0
@@ -289,6 +290,8 @@ class Plugin(indigo.PluginBase):
                 x=x+1
                 y=y+1
                 self.sleep(60)
+                if x>=5:
+                    self.WaitInterval = 0
 
         except self.StopThread:
             self.debugLog(u'Restarting/or error. Stopping Enphase/Envoy thread.')
@@ -337,6 +340,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
             dev.setErrorStateOnServer(None)
+            self.WaitInterval = 0
 
             return result
 
@@ -370,6 +374,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
             dev.setErrorStateOnServer(None)
+            self.WaitInterval = 0
 
             return result
 
@@ -417,6 +422,7 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 dev.setErrorStateOnServer(u'Offline')
                 result = None
+
                 return result
         return
 
@@ -487,6 +493,7 @@ class Plugin(indigo.PluginBase):
                 self.debugLog(u"Device is offline. No data to return. ")
             # dev.updateStateOnServer('deviceTimestamp', value=t.time())
             result = None
+            self.WaitInterval = 60
             return result
 
 
@@ -523,7 +530,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                     dev.updateStateOnServer('watts', value=0)
                     dev.setErrorStateOnServer(u'Offline')
-
+                self.WaitInterval = 60
                 result = None
                 return result
 
