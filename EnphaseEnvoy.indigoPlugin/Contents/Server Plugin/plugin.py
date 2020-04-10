@@ -11,13 +11,14 @@ Enphase Plugin
 
 import datetime
 import simplejson
+import sys
 import time as t
 import requests
 import urllib2
 import os
 import shutil
 import flatdict
-from ghpu import GitHubPluginUpdater
+
 from requests.auth import HTTPDigestAuth
 
 try:
@@ -49,12 +50,22 @@ class Plugin(indigo.PluginBase):
         self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
         self.deviceNeedsUpdated = ''
         self.prefServerTimeout = int(self.pluginPrefs.get('configMenuServerTimeout', "15"))
-        self.updater = GitHubPluginUpdater(self)
+
         self.configUpdaterInterval = self.pluginPrefs.get('configUpdaterInterval', 24)
         self.configUpdaterForceUpdate = self.pluginPrefs.get('configUpdaterForceUpdate', False)
         self.debugupdate = self.pluginPrefs.get('debugupdate', False)
         self.openStore = self.pluginPrefs.get('openStore', False)
         self.WaitInterval = 0
+
+        self.logger.info(u"")
+        self.logger.info(u"{0:=^130}".format(" Initializing New Plugin Session "))
+        self.logger.info(u"{0:<30} {1}".format("Plugin name:", pluginDisplayName))
+        self.logger.info(u"{0:<30} {1}".format("Plugin version:", pluginVersion))
+        self.logger.info(u"{0:<30} {1}".format("Plugin ID:", pluginId))
+        self.logger.info(u"{0:<30} {1}".format("Indigo version:", indigo.server.version))
+        self.logger.info(u"{0:<30} {1}".format("Python version:", sys.version.replace('\n', '')))
+        self.logger.info(u"{0:<30} {1}".format("Python Directory:", sys.prefix.replace('\n', '')))
+        self.logger.info(u"{0:=^130}".format(" End Initializing New Plugin Session "))
 
         # Convert old debugLevel scale to new scale if needed.
         # =============================================================
@@ -107,9 +118,9 @@ class Plugin(indigo.PluginBase):
         # IF ENVOY START ONLINE
         if dev.model=='Enphase Panel':
             #self.errorLog(' Enphase Panel')
-            dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+            #dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
             #dev.updateStateImageOnServer(indigo.kStateImageSel.Auto)
-            dev.updateStateOnServer('watts', value=0)
+            #dev.updateStateOnServer('watts', value=0)
             dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
             dev.stateListOrDisplayStateIdChanged()
             return
@@ -191,7 +202,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('storageWattsNow', value=0)
             dev.updateStateOnServer('storageState', value='Offline')
             dev.updateStateOnServer('storagePercentFull', value=0)
-            dev.updateStateOnServer('whLifetime', value=0)
+            #dev.updateStateOnServer('whLifetime', value=0)
             dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
         if dev.model == 'Enphase Panel':
             dev.updateStateOnServer('watts', value=0)
@@ -212,18 +223,6 @@ class Plugin(indigo.PluginBase):
     def forceUpdate(self):
         self.updater.update(currentVersion='0.0.0')
 
-    def checkForUpdates(self):
-
-        updateavailable = self.updater.getLatestVersion()
-        if updateavailable and self.openStore:
-            self.logger.info(u'Enphase Plugin: Update Checking.  Update is Available.  Taking you to plugin Store. ')
-            self.sleep(2)
-            self.pluginstoreUpdate()
-        elif updateavailable and not self.openStore:
-            self.errorLog(u'Enphase Plugin: Update Checking.  Update is Available.  Please check Store for details/download.')
-    def updatePlugin(self):
-        self.updater.update()
-
     def pluginstoreUpdate(self):
         iurl = 'http://www.indigodomo.com/pluginstore/105/'
         self.browserOpen(iurl)
@@ -238,7 +237,7 @@ class Plugin(indigo.PluginBase):
                 self.sleep(30)
                 self.checkPanelInventory(dev)
                 self.sleep(30)
-                self.checkThePanels(dev)
+                self.checkThePanels_New(dev)
                 self.sleep(10)
         return
 
@@ -258,7 +257,8 @@ class Plugin(indigo.PluginBase):
                     self.sleep(30)
                     self.checkPanelInventory(dev)
                     self.sleep(30)
-                    self.checkThePanels(dev)
+                    self.checkThePanels_New(dev)
+
                     self.sleep(10)
 
 
@@ -274,7 +274,7 @@ class Plugin(indigo.PluginBase):
                         self.refreshDataForDev(dev)
                         self.sleep(1)
                         if x>=5 and self.WaitInterval <=0:
-                            self.checkThePanels(dev)
+                            self.checkThePanels_New(dev)
                             self.sleep(5)
                             x=0
                         if y>=8 and self.WaitInterval <=0:
@@ -306,11 +306,6 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"Starting Enphase Plugin. startup() method called.")
 
         # See if there is a plugin update and whether the user wants to be notified.
-        try:
-            self.checkForUpdates()
-            self.sleep(1)
-        except Exception as error:
-            self.errorLog(u"Update checker error: {0}".format(error))
 
     def validatePrefsConfigUi(self, valuesDict):
         if self.debugLevel >= 2:
@@ -390,30 +385,31 @@ class Plugin(indigo.PluginBase):
             result = None
             return result
 
-    def checkThePanels(self,dev):
 
+
+    def checkThePanels_New(self,dev):
         if self.debugLevel >= 2:
             self.debugLog(u'check thepanels called')
-
         if dev.pluginProps['activatePanels']:
             self.thePanels = self.getthePanels(dev)
-
             try:
                 if self.thePanels is not None:
                     x = 1
                     update_time = t.strftime("%m/%d/%Y at %H:%M")
                     for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
-                        deviceName = 'Enphase SolarPanel ' + str(x)
-                        if dev.states['producing']:
-                            dev.updateStateOnServer('watts',value=int(self.thePanels[x-1]['lastReportWatts']),uiValue=str(self.thePanels[x-1]['lastReportWatts']))
-
-                        dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp( int(self.thePanels[x-1]['lastReportDate'])).strftime('%c')))
-                        dev.updateStateOnServer('serialNo', value=float(self.thePanels[x - 1]['serialNumber']))
-                        dev.updateStateOnServer('maxWatts', value=int(self.thePanels[x - 1]['maxReportWatts']))
-                        dev.updateStateOnServer('deviceLastUpdated', value=update_time)
-                        dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
-                        dev.setErrorStateOnServer(None)
-                        x = x + 1
+                        for panel in self.thePanels:
+                            if float(dev.states['serialNo']) == float(panel['serialNumber']):
+                                #self.logger.error(u'Matched Panel Found:'+unicode(panel['serialNumber']))
+                                #deviceName = 'Enphase SolarPanel ' + str(x)
+                                #self.logger.error(u"Enphase Panel SN:"+unicode(str(panel['serialNumber'])))
+                                if dev.states['producing']:
+                                    dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(panel['lastReportWatts']))
+                                dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp( int(panel['lastReportDate'])).strftime('%c')))
+                                #dev.updateStateOnServer('serialNo', value=float(panel['serialNumber']))
+                                dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
+                                dev.updateStateOnServer('deviceLastUpdated', value=update_time)
+                                dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
+                                dev.setErrorStateOnServer(None)
 
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+unicode(error))
@@ -425,6 +421,7 @@ class Plugin(indigo.PluginBase):
 
                 return result
         return
+
 
     def checkPanelInventory(self,dev):
         if self.debugLevel >= 2:
@@ -442,10 +439,10 @@ class Plugin(indigo.PluginBase):
                                # self.errorLog(u'panel serial no:'+str(devices['serial_num']))
                             #self.errorLog(u'Dev.states Producing type is' + str(type(dev.states['producing'])))
                             #self.errorLog(u'Devices Producing type is' + str(type(devices['producing'])))
-                            if int(dev.states['serialNo']) == int(devices['serial_num']):
+                            if float(dev.states['serialNo']) == float(devices['serial_num']):
                                 if dev.states['producing']==True and devices['producing']==False:
                                     if self.debugLevel >= 1:
-                                        self.debugLog(u'Producing: States true, devices(producing) False: devices[prodcing] equals:'+str(devices['producing']))
+                                        self.debugLog(u'Producing: States true, devices(producing) False: devices[producing] equals:'+str(devices['producing']))
                                     #  change only once
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
                                     dev.updateStateOnServer('watts', value=0, uiValue='--')
@@ -454,6 +451,7 @@ class Plugin(indigo.PluginBase):
                                         self.debugLog(u'States Producing False, and devices now shows True: device(producing):' + str(devices['producing']))
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
                                     dev.updateStateOnServer('watts', value=dev.states['watts'], uiValue=str(dev.states['watts']))
+
                                 dev.updateStateOnServer('status',   value=str(devices['device_status']))
                                 dev.updateStateOnServer('modelNo', value=str(devices['part_num']))
                                 dev.updateStateOnServer('producing',   value=devices['producing'])
@@ -766,30 +764,75 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u'generate Panels run')
         try:
             #delete all panel devices first up
-
             dev = indigo.devices[devId]
-
             if self.debugLevel>=2:
                 self.debugLog(u'Folder ID'+str(dev.folderId))
             self.thePanels = self.getthePanels(dev)
+
             if self.thePanels is not None:
                 x = 1
                 for array in self.thePanels:
-                     deviceName = 'Enphase SolarPanel '+str(x)
-                     noDevice = True
-                     for panels in indigo.devices.itervalues('self.EnphasePanelDevice'):
-                         if panels.name == deviceName:
-                            noDevice = False
-                     if noDevice:
-                        device = indigo.device.create(address=deviceName, deviceTypeId='EnphasePanelDevice',name=deviceName,protocol=indigo.kProtocol.Plugin, folder=dev.folderId)
-                     x=x+1
+                    noDevice = True
+                    for paneldevice in indigo.devices.itervalues('self.EnphasePanelDevice'):
+                       # self.logger.debug(unicode(paneldevice.states['serialNo'])+"& array:"+  unicode(array['serialNumber']))
+                        if float(paneldevice.states['serialNo']) == float(array['serialNumber']):  # check all exisiting devices for serialNo - if doesnt create
+                            self.logger.debug(u'Matching Serial Number found. Device being skipped.')
+                            noDevice=False
+
+                    #self.logger.error("Serial Number:"+unicode(serialNumber))
+                    deviceName = "Enphase Panel "+ str(x)
+                    if noDevice:
+                        serialNumber = float(array['serialNumber'])
+                        update_time = t.strftime("%m/%d/%Y at %H:%M")
+                        #self.logger.error(u'SerialNumber:'+unicode(array['serialNumber']))
+                        stateList = [
+                            {'key': 'serialNo', 'value': float(array['serialNumber'])},
+                            {'key': 'watts', 'value': int(array['lastReportWatts']) },
+                            {'key': 'lastCommunication', 'value': str(datetime.datetime.fromtimestamp(int(array['lastReportDate'])).strftime('%c'))},
+                            {'key': 'maxWatts', 'value': 0},
+                            {'key': 'deviceLastUpdated', 'value': update_time },
+                            {'key': 'deviceIsOnline', 'value': True},
+                            {'key': 'status', 'value': 'starting communication'},
+                            {'key': 'modelNo', 'value': 'unknown'},
+                            {'key': 'producing', 'value': False},
+                            {'key': 'communicating', 'value': False}
+                        ]
+                        device = indigo.device.create(
+                            address=str(serialNumber),
+                            deviceTypeId='EnphasePanelDevice',
+                            name=self.getUniqueDeviceName(deviceName),
+                            protocol=indigo.kProtocol.Plugin,
+                            folder=dev.folderId)
+
+                        self.logger.info(unicode('Panel Device Created:'+unicode(self.getUniqueDeviceName(deviceName))))
+                        device.updateStatesOnServer(stateList)
+
+                        self.sleep(0.1)
+
+                    x=x+1
             #now fill with data
             self.sleep(2)
-            self.checkThePanels(dev)
+            self.checkThePanels_New(dev)
 
 
         except Exception as error:
+            self.logger.exception("Exception within Generate Panels")
             self.errorLog(u'error within generate panels'+unicode(error.message))
+
+    ########################################
+    def getUniqueDeviceName(self, seedName):
+        seedName = seedName.strip()
+        if (seedName not in indigo.devices):
+            return seedName
+        else:
+            counter = 1
+            candidate = seedName + " " + str(counter)
+            while candidate in indigo.devices:
+                counter = counter + 1
+                candidate = seedName + " " + str(counter)
+            return candidate
+
+    ########################################
 
     def deletePanelDevices(self, valuesDict, typeId, devId):
         if self.debugLevel >= 2:

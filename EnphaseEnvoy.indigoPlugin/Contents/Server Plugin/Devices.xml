@@ -288,13 +288,11 @@
         <TriggerLabel>Power Generated</TriggerLabel>
         <ControlPageLabel>Power Generated</ControlPageLabel>
       </State>
-
       <State id="maxWatts">
         <ValueType>Number</ValueType>
         <TriggerLabel>Max Watts Generated</TriggerLabel>
         <ControlPageLabel>Max Watts Generated</ControlPageLabel>
       </State>
-
       <State id="serialNo">
         <ValueType>Number</ValueType>
         <TriggerLabel>Serial No Panel</TriggerLabel>

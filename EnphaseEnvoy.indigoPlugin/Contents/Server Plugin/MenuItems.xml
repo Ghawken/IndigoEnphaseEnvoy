@@ -1,13 +1,5 @@
 <?xml version="1.0"?>
 <MenuItems>
-  <MenuItem id="checkForUpdates">
-    <Name>Check for Plugin Updates...</Name>
-    <CallbackMethod>checkForUpdates</CallbackMethod>
-  </MenuItem>
-        <MenuItem id="pluginstoreUpdate">
-        <Name>Open PluginStore for Download</Name>
-        <CallbackMethod>pluginstoreUpdate</CallbackMethod>
-    </MenuItem>
   <MenuItem id="refreshData">
     <Name>Refresh Data Now...</Name>
     <CallbackMethod>refreshDatafromMenu</CallbackMethod>
