@@ -69,6 +69,8 @@
           <Option value="offline">Offline</Option>
           <Option value="importing">Importing Energy</Option>
            <Option value="exporting">Exporting Energy</Option>
+              <Option value="producing">Producing Energy</Option>
+              <Option value="idle">Not Producing Energy</Option>
           </List>
         </ValueType>
         <TriggerLabel>Power Generation Status</TriggerLabel>

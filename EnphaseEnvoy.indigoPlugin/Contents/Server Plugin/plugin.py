@@ -858,7 +858,7 @@ class Plugin(indigo.PluginBase):
         #testdata4 = {"production":[{"type":"inverters","activeCount":26,"readingTime":1583573417,"wNow":1735,"whLifetime":26678},{"type":"eim","activeCount":0,"measurementType":"production","readingTime":1583573476,"wNow":-2.835,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.362,"rmsVoltage":717.437,"reactPwr":0.829,"apprntPwr":86.904,"pwrFactor":-0.06,"whToday":0.0,"whLastSevenDays":0.0,"vahToday":0.0,"varhLeadToday":0.0,"varhLagToday":0.0}],"consumption":[{"type":"eim","activeCount":0,"measurementType":"total-consumption","readingTime":1583573476,"wNow":-1.149,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.825,"rmsVoltage":717.603,"reactPwr":-1.6,"apprntPwr":592.15,"pwrFactor":-0.0,"whToday":0.0,"whLastSevenDays":0.0,"vahToday":0.0,"varhLeadToday":0.0,"varhLagToday":0.0},{"type":"eim","activeCount":0,"measurementType":"net-consumption","readingTime":1583573476,"wNow":1.686,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.463,"rmsVoltage":717.769,"reactPwr":-0.771,"apprntPwr":110.751,"pwrFactor":0.05,"whToday":0,"whLastSevenDays":0,"vahToday":0,"varhLeadToday":0,"varhLagToday":0}],"storage":[{"type":"acb","activeCount":0,"readingTime":0,"wNow":0,"whNow":0,"state":"idle"}]}
         #JohnMcEvoy
 
-        #self.finalDict = testdata3
+        #self.finalDict = testdata4
 
         if self.debugLevel >= 2:
             self.debugLog(u"Saving Values method called.")
@@ -880,7 +880,8 @@ class Plugin(indigo.PluginBase):
                         self.sleep(2)
                         unmeteredData = self.legacyGetTheData(dev)
                         self.sleep(5)
-                        consumptionData = self.getAPIDataConsumption(dev)
+                        ## Unfortunately this endpoint doesn't report in my two case examples
+                        # consumptionData = self.getAPIDataConsumption(dev)
                 else:
                     self.EnvoyStype = "M"
                     self.logger.debug("Envoy-S Metered Version Found.  Continuing.")
@@ -938,26 +939,33 @@ class Plugin(indigo.PluginBase):
                         dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
                 elif self.EnvoyStype=="U":
                     # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
-                    if consumptionData is not None:
-                        if 'wattsNow' in consumptionData:
-                            consumptionWatts = int(consumptionData['wattsNow'])
-                            dev.updateStateOnServer('consumptionWattsNow', consumptionWatts)
-                    #dev.updateStateOnServer('consumptionWattsNow', value=int(self.finalDict['consumption'][0]['wNow']))
-                    #consumptionWatts = int(self.finalDict['consumption'][0]['wNow'])  ## total consumption
-                        if 'wattHoursSevenDays' in consumptionData:
-                            dev.updateStateOnServer('consumption7days', value=int(consumptionData['wattHoursSevenDays']))
-                        if 'wattHoursToday' in consumptionData:
-                            dev.updateStateOnServer('consumptionWattsToday', value=int(consumptionData['wattHoursToday']))
-                        if 'wattHoursLifetime' in consumptionData:
-                            dev.updateStateOnServer('consumptionwhLifetime', value=int(consumptionData['wattHoursLifetime']))
-                    else:
-                        self.logger.debug(unicode("API Consumption returned nothing."))
-                    if self.debugLevel >= 2:
-                        self.debugLog(u'No netConsumption being reporting.....Calculating....')
-                    # Calculate?
-                    #
-                    netConsumption = int(consumptionWatts) - int(productionWatts)
-                    dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
+                    # not consumption data appears possible
+                    dev.updateStateOnServer('consumptionWattsNow',value=0,uiValue="Not Reported")
+                    dev.updateStateOnServer('consumption7days', value=int(0),uiValue="Not Reported")
+                    dev.updateStateOnServer('consumptionWattsToday', value=int(0),uiValue="Not Reported")
+                    dev.updateStateOnServer('consumptionwhLifetime', value=int(0),uiValue="Not Reported")
+                    dev.updateStateOnServer('netConsumptionWattsNow', value=int(0),uiValue="Not Reported")
+
+                    # if consumptionData is not None:
+                    #     if 'wattsNow' in consumptionData:
+                    #         consumptionWatts = int(consumptionData['wattsNow'])
+                    #         dev.updateStateOnServer('consumptionWattsNow', consumptionWatts)
+                    # #dev.updateStateOnServer('consumptionWattsNow', value=int(self.finalDict['consumption'][0]['wNow']))
+                    # #consumptionWatts = int(self.finalDict['consumption'][0]['wNow'])  ## total consumption
+                    #     if 'wattHoursSevenDays' in consumptionData:
+                    #         dev.updateStateOnServer('consumption7days', value=int(consumptionData['wattHoursSevenDays']))
+                    #     if 'wattHoursToday' in consumptionData:
+                    #         dev.updateStateOnServer('consumptionWattsToday', value=int(consumptionData['wattHoursToday']))
+                    #     if 'wattHoursLifetime' in consumptionData:
+                    #         dev.updateStateOnServer('consumptionwhLifetime', value=int(consumptionData['wattHoursLifetime']))
+                    # else:
+                    #     self.logger.debug(unicode("API Consumption returned nothing."))
+                    # if self.debugLevel >= 2:
+                    #     self.debugLog(u'No netConsumption being reporting.....Calculating....')
+                    # # Calculate?
+                    # #
+                    # netConsumption = int(consumptionWatts) - int(productionWatts)
+                    # dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
 
             else:
                 if self.debugLevel >= 2:
@@ -983,31 +991,46 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('secsSinceReading', value=timeDifference)
             if self.debugLevel >= 2:
                 self.debugLog(u"State Image Selector:"+unicode(dev.displayStateImageSel))
+            if self.EnvoyStype == "M":
+                if productionWatts >= consumptionWatts and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
+                    #Generating more Power - and a change
+                    # If Generating Power - but device believes importing - recent change unpdate to refleect
+                    if self.debugLevel >= 2:
+                        self.debugLog(u'**CHANGED**: Exporting Power')
 
-            if productionWatts >= consumptionWatts and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
-                #Generating more Power - and a change
-                # If Generating Power - but device believes importing - recent change unpdate to refleect
-                if self.debugLevel >= 2:
-                    self.debugLog(u'**CHANGED**: Exporting Power')
+                    dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
+                    dev.updateStateOnServer('generatingPower', value=True)
+                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
+                    if self.debugLevel >= 2:
+                        self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
 
-                dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
-                dev.updateStateOnServer('generatingPower', value=True)
-                dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
-                if self.debugLevel >= 2:
-                    self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+                if productionWatts < consumptionWatts and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
+                    #Must be opposite or and again a change only
+                    if self.debugLevel >= 2:
+                        self.debugLog(u'**CHANGED**: Importing power')
 
-            if productionWatts < consumptionWatts and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
-                #Must be opposite or and again a change only
-                if self.debugLevel >= 2:
-                    self.debugLog(u'**CHANGED**: Importing power')
+                    dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
+                    dev.updateStateOnServer('generatingPower', value=False)
+                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+                    if self.debugLevel >= 2:
+                        self.debugLog(u"State Image Selector:" + unicode(dev.displayStateImageSel))
+            elif self.EnvoyStype == "U":
+            # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
+            # not consumption data appears possible
+                self.logger.debug("Envoy Unmetered equivalent used for Status:")
+                self.logger.debug("Producing Watts:" + unicode(productionWatts))
+                if productionWatts > 0:
+                    ## change meaning of generatingPower here for unmetered to any power, not just net power
 
-                dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
-                dev.updateStateOnServer('generatingPower', value=False)
-                dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
-                if self.debugLevel >= 2:
-                    self.debugLog(u"State Image Selector:" + unicode(dev.displayStateImageSel))
-        # add Cost check device here
-
+                    dev.updateStateOnServer('generatingPower', value=True, uiValue="Producing Power")
+                    dev.updateStateOnServer('powerStatus', value="producing", uiValue="Producing Energy")
+                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
+                    if self.debugLevel >= 2:
+                        self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+                elif productionWatts <= 0:
+                    dev.updateStateOnServer('generatingPower', value=False, uiValue="No Power Production")
+                    dev.updateStateOnServer('powerStatus', value="idle", uiValue="Not Producing Energy")
+                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
             for costdev in indigo.devices.itervalues('self.EnphaseEnvoyCostDevice'):
                 if self.debugLevel >2:
                     self.debugLog(u'Updating Cost Device')
@@ -1269,7 +1292,7 @@ class Plugin(indigo.PluginBase):
                     if self.debugLevel >= 2:
                         self.debugLog(u"Offline: Refreshing device: {0}".format(dev.name))
 
-                    self.finalDict = self.LegacyGetTheData(dev)
+                    self.finalDict = self.legacyGetTheData(dev)
                 # if device online normal time
 
                 if dev.states['deviceIsOnline']:
