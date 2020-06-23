@@ -260,11 +260,6 @@ class Plugin(indigo.PluginBase):
             y=0
             #One quick check on startup - to avoid Panel delays
 
-            # for dev in indigo.devices.itervalues("self.EnphaseEnvoyALL"):
-            #     if dev.enabled:
-            #         finaldict = self.getTheDataAllModels(dev)
-            #         self.logger.info(unicode(finaldict))
-
             for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
                 if self.debugLevel>=2:
                     self.debugLog(u'Quick Checks Before Loop')
@@ -297,11 +292,11 @@ class Plugin(indigo.PluginBase):
                             self.checkPanelInventory(dev)
                             self.sleep(5)
                             y=0
-                # for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
-                #     if self.debugLevel >=2:
-                #         self.debugLog(u'Checking Legacy devices: {0}:'.format(dev.name))
-                #     if dev.enabled:
-                #         self.legacyRefreshEnvoy(dev)
+                for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
+                    if self.debugLevel >=2:
+                        self.debugLog(u'Checking Legacy devices: {0}:'.format(dev.name))
+                    if dev.enabled:
+                        self.legacyRefreshEnvoy(dev)
 
                 x=x+1
                 y=y+1
