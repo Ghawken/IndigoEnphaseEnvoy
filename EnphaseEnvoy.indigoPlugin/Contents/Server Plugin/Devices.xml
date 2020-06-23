@@ -231,7 +231,19 @@
         <TriggerLabel>Device Last Updated</TriggerLabel>
         <ControlPageLabel>Device Last Updated</ControlPageLabel>
            </State>
-
+        <State id="powerStatus">
+        <ValueType>
+          <List>
+          <Option value="offline">Offline</Option>
+          <Option value="importing">Importing Energy</Option>
+           <Option value="exporting">Exporting Energy</Option>
+              <Option value="producing">Producing Energy</Option>
+              <Option value="idle">Not Producing Energy</Option>
+          </List>
+        </ValueType>
+        <TriggerLabel>Power Generation Status</TriggerLabel>
+        <ControlPageLabel>Power Generation Status</ControlPageLabel>
+      </State>
      <State id="wattHoursToday">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power Production Today (watts)</TriggerLabel>

@@ -230,7 +230,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('wattHoursSevenDays', value=0)
             dev.updateStateOnServer('wattHoursToday', value=0)
             dev.updateStateOnServer('wattsNow', value=0)
-
+            dev.updateStateOnServer('powerStatus', value='offline', uiValue='Offline')
     def forceUpdate(self):
         self.updater.update(currentVersion='0.0.0')
 
@@ -259,7 +259,12 @@ class Plugin(indigo.PluginBase):
             x=0
             y=0
             #One quick check on startup - to avoid Panel delays
-
+            for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
+                if self.debugLevel >=2:
+                    self.debugLog(u'Checking Legacy devices: {0}:'.format(dev.name))
+                if dev.enabled:
+                    self.legacyRefreshEnvoy(dev)
+            self.sleep(5)
             for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
                 if self.debugLevel>=2:
                     self.debugLog(u'Quick Checks Before Loop')
@@ -270,6 +275,8 @@ class Plugin(indigo.PluginBase):
                     self.sleep(30)
                     self.checkThePanels_New(dev)
                     self.sleep(10)
+
+
 
 
             while True:
@@ -630,7 +637,8 @@ class Plugin(indigo.PluginBase):
             if self.debugLevel >= 2:
                 self.debugLog(u"Device is offline. No data to return. ")
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
-            dev.updateStateOnServer('powerStatus', value = 'offline')
+            dev.updateStateOnServer('powerStatus', value='offline', uiValue='Offline')
+            #dev.updateStateOnServer('powerStatus', value = 'offline')
             dev.setErrorStateOnServer(u'Offline')
             result = None
             return result
@@ -809,7 +817,7 @@ class Plugin(indigo.PluginBase):
                 result = None
                 return result
 
-    def legacyParseStateValues(self, dev):
+    def legacyParseStateValues(self, dev, results):
         """
         The parseStateValues() method walks through the dict and assigns the
         corresponding value to each device state.
@@ -818,10 +826,20 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"Saving Values method called.")
 
         try:
-            dev.updateStateOnServer('wattHoursLifetime', value=int(self.finalDict['wattHoursLifetime']))
-            dev.updateStateOnServer('wattHoursSevenDays', value=int(self.finalDict['wattHoursSevenDays']))
-            dev.updateStateOnServer('wattHoursToday', value=int(self.finalDict['wattHoursToday']))
-            dev.updateStateOnServer('wattsNow', value=int(self.finalDict['wattsNow']))
+            dev.updateStateOnServer('wattHoursLifetime', value=int(results['wattHoursLifetime']))
+            dev.updateStateOnServer('wattHoursSevenDays', value=int(results['wattHoursSevenDays']))
+            dev.updateStateOnServer('wattHoursToday', value=int(results['wattHoursToday']))
+            dev.updateStateOnServer('wattsNow', value=int(results['wattsNow']))
+            update_time = t.strftime("%m/%d/%Y at %H:%M")
+            dev.updateStateOnServer('deviceLastUpdated', value=update_time)
+
+            if int(results['wattsNow'])>0:
+                dev.updateStateOnServer('powerStatus', value="producing", uiValue="Producing Energy")
+                dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
+            elif int(results['wattsNow'])<=0:
+                dev.updateStateOnServer('powerStatus', value="idle", uiValue="Not Producing Energy")
+                dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+
             if self.debugLevel >= 1:
                 self.debugLog("State Image Selector:"+str(dev.displayStateImageSel))
 
@@ -1287,18 +1305,18 @@ class Plugin(indigo.PluginBase):
                     if self.debugLevel >= 2:
                         self.debugLog(u"Offline: Refreshing device: {0}".format(dev.name))
 
-                    self.finalDict = self.legacyGetTheData(dev)
+                    results = self.legacyGetTheData(dev)
                 # if device online normal time
 
                 if dev.states['deviceIsOnline']:
                     if self.debugLevel >= 2:
                         self.debugLog(u"Online: Refreshing device: {0}".format(dev.name))
-                    self.finalDict = self.legacyGetTheData(dev)
+                    results = self.legacyGetTheData(dev)
                     #ignore panel level data until later
                     #self.PanelDict = self.getthePanels(dev)
                     # Put the final values into the device states - only if online
                 if dev.states['deviceIsOnline']:
-                    self.legacyParseStateValues(dev)
+                    self.legacyParseStateValues(dev, results)
             else:
                 if self.debugLevel >= 2:
                     self.debugLog(u"    Disabled: {0}".format(dev.name))
