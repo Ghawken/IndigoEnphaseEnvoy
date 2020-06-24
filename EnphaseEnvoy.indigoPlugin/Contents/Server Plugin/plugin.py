@@ -264,7 +264,7 @@ class Plugin(indigo.PluginBase):
                     self.debugLog(u'Checking Legacy devices: {0}:'.format(dev.name))
                 if dev.enabled:
                     self.legacyRefreshEnvoy(dev)
-            self.sleep(5)
+            self.sleep(30)
             for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
                 if self.debugLevel>=2:
                     self.debugLog(u'Quick Checks Before Loop')
@@ -274,36 +274,33 @@ class Plugin(indigo.PluginBase):
                     self.checkPanelInventory(dev)
                     self.sleep(30)
                     self.checkThePanels_New(dev)
-                    self.sleep(10)
-
-
-
-
+                    self.sleep(30)
             while True:
-
-                if self.debugLevel >= 2:
-                    self.debugLog(u" ")
-
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
                     if self.debugLevel >= 2:
                         self.debugLog(u"MainLoop:  {0}:".format(dev.name))
                     if dev.enabled and self.WaitInterval <=0:
-                        self.getTheData(dev)
+                        #self.getTheData(dev)
                         self.refreshDataForDev(dev)
-                        self.sleep(10)
+                        self.sleep(15)
+
                         if x>=5 and self.WaitInterval <=0:
+                            self.sleep(60)
                             self.checkThePanels_New(dev)
-                            self.sleep(5)
+                            self.sleep(15)
                             x=0
                         if y>=8 and self.WaitInterval <=0:
+                            self.sleep(60)
                             self.checkPanelInventory(dev)
-                            self.sleep(5)
+                            self.sleep(15)
                             y=0
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
                     if self.debugLevel >=2:
                         self.debugLog(u'Checking Legacy devices: {0}:'.format(dev.name))
-                    if dev.enabled:
+                    if dev.enabled and self.WaitInterval <=0:
+                        self.sleep(60)
                         self.legacyRefreshEnvoy(dev)
+                        self.sleep(15)
 
                 x=x+1
                 y=y+1
@@ -785,34 +782,27 @@ class Plugin(indigo.PluginBase):
                 return
 
         if dev.states['deviceIsOnline']:
-
             try:
                 url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production/inverters'
-                #password = dev.pluginProps['envoySerial']
-                #password = password[-6:]
-
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+unicode(password))
-
-                r = requests.get(url, auth=HTTPDigestAuth('envoy',password), timeout=10)
+                r = requests.get(url, auth=HTTPDigestAuth('envoy',password), timeout=30)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(u"Inverter Result:" + unicode(result))
-
                 return result
 
             except Exception as error:
 
                 indigo.server.log(u"Error connecting to Device:" + dev.name)
-
                 if self.debugLevel >= 2:
                     self.debugLog(u"Device is offline. No data to return. ")
-
                 # dev.updateStateOnServer('deviceTimestamp', value=t.time())
-                for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
-                    dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
-                    dev.updateStateOnServer('watts', value=0)
-                    dev.setErrorStateOnServer(u'Offline')
+                dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+                for paneldevice in indigo.devices.itervalues('self.EnphasePanelDevice'):
+                    paneldevice.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+                    paneldevice.updateStateOnServer('watts', value=0)
+                    paneldevice.setErrorStateOnServer(u'Offline')
                 self.WaitInterval = 60
                 result = None
                 return result
@@ -875,7 +865,7 @@ class Plugin(indigo.PluginBase):
 
         if self.debugLevel >= 2:
             self.debugLog(u"Saving Values method called.")
-            self.debugLog(unicode(self.finalDict))
+            #self.debugLog(unicode(self.finalDict))
 
         try:
 
@@ -892,7 +882,7 @@ class Plugin(indigo.PluginBase):
                         self.logger.debug("Calling Enphase API for additional data...")
                         self.sleep(2)
                         unmeteredData = self.legacyGetTheData(dev)
-                        self.sleep(5)
+                        self.sleep(15)
                         ## Unfortunately this endpoint doesn't report in my two case examples
                         # consumptionData = self.getAPIDataConsumption(dev)
                 else:
@@ -912,7 +902,7 @@ class Plugin(indigo.PluginBase):
                         dev.updateStateOnServer('productionwhLifetime', value=int(self.finalDict['production'][1]['whLifetime']))
                     elif self.EnvoyStype == "U":
                         dev.updateStateOnServer('productionWattsNow', value=int(self.finalDict['production'][1]['wNow']))
-                        productionWatts = int(self.finalDict['production'][1]['wNow'])
+                        productionWatts = int(unmeteredData['wattsNow'])
                         if unmeteredData is not None:
                             if 'wattHoursSevenDays' in unmeteredData:
                                 dev.updateStateOnServer('production7days', value=int(unmeteredData['wattHoursSevenDays']))
@@ -1034,7 +1024,6 @@ class Plugin(indigo.PluginBase):
                 self.logger.debug("Producing Watts:" + unicode(productionWatts))
                 if productionWatts > 0:
                     ## change meaning of generatingPower here for unmetered to any power, not just net power
-
                     dev.updateStateOnServer('generatingPower', value=True, uiValue="Producing Power")
                     dev.updateStateOnServer('powerStatus', value="producing", uiValue="Producing Energy")
                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
@@ -1177,7 +1166,6 @@ class Plugin(indigo.PluginBase):
 
                         self.logger.info(unicode('Panel Device Created:'+unicode(self.getUniqueDeviceName(deviceName))))
                         device.updateStatesOnServer(stateList)
-
                         self.sleep(0.1)
 
                     x=x+1
@@ -1259,7 +1247,6 @@ class Plugin(indigo.PluginBase):
         if dev.configured:
             if self.debugLevel >= 2:
                 self.debugLog(u"Found configured device: {0}".format(dev.name))
-
             if dev.enabled:
                 if self.debugLevel >= 2:
                     self.debugLog(u"   {0} is enabled.".format(dev.name))
@@ -1304,7 +1291,6 @@ class Plugin(indigo.PluginBase):
                 if dev.states['deviceIsOnline'] == False and timeDifference >= 180:
                     if self.debugLevel >= 2:
                         self.debugLog(u"Offline: Refreshing device: {0}".format(dev.name))
-
                     results = self.legacyGetTheData(dev)
                 # if device online normal time
 
@@ -1334,19 +1320,6 @@ class Plugin(indigo.PluginBase):
         self.refreshDataForDev(dev)
         return True
 
-    def stopSleep(self, start_sleep):
-        """
-        The stopSleep() method accounts for changes to the user upload interval
-        preference. The plugin checks every 2 seconds to see if the sleep
-        interval should be updated.
-        """
-        try:
-            total_sleep = float(self.pluginPrefs.get('configMenuUploadInterval', 300))
-        except:
-            total_sleep = iTimer  # TODO: Note variable iTimer is an unresolved reference.
-        if t.time() - start_sleep > total_sleep:
-            return True
-        return False
 
     def toggleDebugEnabled(self):
         """
