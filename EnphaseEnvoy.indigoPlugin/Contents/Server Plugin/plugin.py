@@ -256,61 +256,63 @@ class Plugin(indigo.PluginBase):
     def runConcurrentThread(self):
 
         try:
-            x=0
-            y=0
-            #One quick check on startup - to avoid Panel delays
-            for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
-                if self.debugLevel >=2:
-                    self.debugLog(u'Checking Legacy devices: {0}:'.format(dev.name))
-                if dev.enabled:
-                    self.legacyRefreshEnvoy(dev)
-            self.sleep(30)
+            panellastcheck = t.time()
+            envoyslastcheck = t.time()
+            envoylegacylastcheck = t.time()
+            panelinventorylastcheck = t.time()
+            Anychecklastcheck = t.time()
+
+## check main device on startup.
             for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
                 if self.debugLevel>=2:
                     self.debugLog(u'Quick Checks Before Loop')
                 if dev.enabled:
                     self.refreshDataForDev(dev)
-                    self.sleep(30)
-                    self.checkPanelInventory(dev)
-                    self.sleep(30)
-                    self.checkThePanels_New(dev)
-                    self.sleep(30)
+                    self.sleep(15)
+            for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
+                if dev.enabled :
+                    self.legacyRefreshEnvoy(dev)
+                    self.sleep(15)
+
+# Loop for continuing checks
             while True:
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
-                    if self.debugLevel >= 2:
-                        self.debugLog(u"MainLoop:  {0}:".format(dev.name))
-                    if dev.enabled and self.WaitInterval <=0:
-                        #self.getTheData(dev)
+                    if dev.enabled and t.time()>(envoyslastcheck+60):  # 2minutes
                         self.refreshDataForDev(dev)
-                        self.sleep(15)
-
-                        if x>=5 and self.WaitInterval <=0:
-                            self.sleep(60)
-                            self.checkThePanels_New(dev)
-                            self.sleep(15)
-                            x=0
-                        if y>=8 and self.WaitInterval <=0:
-                            self.sleep(60)
-                            self.checkPanelInventory(dev)
-                            self.sleep(15)
-                            y=0
+                        envoyslastcheck = t.time()
+                        self.sleep(5)
+                    if dev.enabled and t.time() > (panellastcheck + 200):   # minutes
+                        self.checkThePanels_New(dev)
+                        panellastcheck = t.time()
+                        self.sleep(5)
+                    if dev.enabled and t.time() > (panelinventorylastcheck + 300):   # minutes
+                        self.checkPanelInventory(dev)
+                        self.sleep(5)
+                        panelinventorylastcheck = t.time()
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
-                    if self.debugLevel >=2:
-                        self.debugLog(u'Checking Legacy devices: {0}:'.format(dev.name))
-                    if dev.enabled and self.WaitInterval <=0:
-                        self.sleep(60)
+                    if dev.enabled and t.time()>(envoylegacylastcheck+60):
                         self.legacyRefreshEnvoy(dev)
-                        self.sleep(15)
+                        self.sleep(5)
+                        envoylegacylastcheck = t.time()
 
-                x=x+1
-                y=y+1
-                self.sleep(60)
-                if x>=5:
+                self.sleep(30)
+                if self.WaitInterval>0:
                     self.WaitInterval = 0
+                    self.sleep(120)
+                    envoyslastcheck = t.time()
+                    envoylegacylastcheck = t.time()
+                    panelinventorylastcheck = t.time()
+                    panellastcheck = t.time()
 
         except self.StopThread:
             self.debugLog(u'Restarting/or error. Stopping Enphase/Envoy thread.')
             pass
+
+        except Exception:
+            self.logger.exception(u"Exception in Main Loop")
+            self.WaitInterval = 60
+            pass
+
 
     def shutdown(self):
         if self.debugLevel >= 2:
@@ -565,6 +567,8 @@ class Plugin(indigo.PluginBase):
 
     def get_serial_number(self,dev):
         """Method to get last six digits of Envoy serial number for auth"""
+        self.logger.debug("Get_Serial_Number_called. ")
+
         try:
             response = requests.get( "http://{}/info.xml".format(dev.pluginProps['sourceXML']),
                 timeout=30, allow_redirects=False)
@@ -586,7 +590,7 @@ class Plugin(indigo.PluginBase):
 
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/production.json'
-            r = requests.get(url,timeout=4)
+            r = requests.get(url,timeout=25, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -617,7 +621,7 @@ class Plugin(indigo.PluginBase):
 
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production'
-            r = requests.get(url,timeout=4)
+            r = requests.get(url,timeout=15 , allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -649,7 +653,7 @@ class Plugin(indigo.PluginBase):
 
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/consumption'
-            r = requests.get(url,timeout=10)
+            r = requests.get(url,timeout=15,  allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -670,6 +674,8 @@ class Plugin(indigo.PluginBase):
                 if self.thePanels is not None:
                     x = 1
                     update_time = t.strftime("%m/%d/%Y at %H:%M")
+                    dev.updateStateOnServer('panelLastUpdated', value=update_time  )
+                    dev.updateStateOnServer('panelLastUpdatedUTC', value=float(t.time())  )                  
                     for dev in indigo.devices.itervalues('self.EnphasePanelDevice'):
                         for panel in self.thePanels:
                             if float(dev.states['serialNo']) == float(panel['serialNumber']):
@@ -752,7 +758,7 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getInventoryData Enphase Panels method called.")
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/inventory.json'
-            r = requests.get(url, timeout =15)
+            r = requests.get(url, timeout =15, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Inventory Result:" + unicode(result))
@@ -775,7 +781,6 @@ class Plugin(indigo.PluginBase):
 
         if self.serial_number_last_six =="":
             if self.get_serial_number(dev):
-                password = self.serial_number_last_six
                 self.logger.debug("Found the correct Serial Number.  Continuing.")
             else:
                 self.logger.debug("Error getting Serial Number.  Cannot update panels unfortunately")
@@ -785,18 +790,32 @@ class Plugin(indigo.PluginBase):
             try:
                 url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production/inverters'
                 if self.debugLevel >=2:
-                    self.debugLog(u"getthePanels: Password:"+unicode(password))
-                r = requests.get(url, auth=HTTPDigestAuth('envoy',password), timeout=30)
+                    self.debugLog(u"getthePanels: Password:"+unicode(self.serial_number_last_six))
+                r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), timeout=30, allow_redirects=False)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(u"Inverter Result:" + unicode(result))
+                return result
+
+            except requests.exceptions.ReadTimeout, e:
+                self.logger.debug("ReadTimeout with get Panel Devices:" + unicode(e))
+                return None
+            except requests.exceptions.Timeout, e:
+                self.logger.debug("ReadTimeout with get Panel Devices:" + unicode(e))
+                return None
+            except requests.exceptions.ConnectionError, e:
+                self.logger.debug("ReadTimeout with get Panel Devices:" + unicode(e))
+                return None
+            except requests.exceptions.ConnectTimeout, e:
+                self.logger.debug("ReadTimeout with get Panel Devices:" + unicode(e))
+                result = None
                 return result
 
             except Exception as error:
 
                 indigo.server.log(u"Error connecting to Device:" + dev.name)
                 if self.debugLevel >= 2:
-                    self.debugLog(u"Device is offline. No data to return. ")
+                    self.logger.exception(u"Device is offline. No data to return. ")
                 # dev.updateStateOnServer('deviceTimestamp', value=t.time())
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 for paneldevice in indigo.devices.itervalues('self.EnphasePanelDevice'):

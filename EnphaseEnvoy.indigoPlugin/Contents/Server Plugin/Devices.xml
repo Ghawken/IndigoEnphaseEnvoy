@@ -98,7 +98,16 @@
         <TriggerLabel>Power Production (watts)</TriggerLabel>
         <ControlPageLabel>Power Production (watts)</ControlPageLabel>
       </State>
-
+        <State id="panelLastUpdatedUTC">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>UTC Time of last Panel Check</TriggerLabel>
+        <ControlPageLabel>UTC Time of last Panel Check</ControlPageLabel>
+      </State>
+        <State id="panelLastUpdated">
+        <ValueType>String</ValueType>
+        <TriggerLabel>DateTime of last Panel Check</TriggerLabel>
+        <ControlPageLabel>DateTime of last Panel Check</ControlPageLabel>
+      </State>
       <State id="consumptionWattsNow">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power consumption (watts)</TriggerLabel>
@@ -384,6 +393,7 @@
         <TriggerLabel>Consumption kWatt Hours Lifetime</TriggerLabel>
         <ControlPageLabel>Consumption kWatt Hours Lifetime</ControlPageLabel>
       </State>
+
         <State id="consumptionTarrifLifetime">
         <ValueType>Number</ValueType>
         <TriggerLabel>Consumption Tarrif Lifetime</TriggerLabel>
