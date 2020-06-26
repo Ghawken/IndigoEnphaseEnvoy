@@ -920,7 +920,7 @@ class Plugin(indigo.PluginBase):
                         dev.updateStateOnServer('productionWattsToday', value=int(self.finalDict['production'][1]['whToday']))
                         dev.updateStateOnServer('productionwhLifetime', value=int(self.finalDict['production'][1]['whLifetime']))
                     elif self.EnvoyStype == "U":
-                        dev.updateStateOnServer('productionWattsNow', value=int(self.finalDict['production'][1]['wNow']))
+                        dev.updateStateOnServer('productionWattsNow', value=int(unmeteredData['wattsNow']))
                         productionWatts = int(unmeteredData['wattsNow'])
                         if unmeteredData is not None:
                             if 'wattHoursSevenDays' in unmeteredData:
