@@ -277,25 +277,25 @@ class Plugin(indigo.PluginBase):
 # Loop for continuing checks
             while True:
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
-                    if dev.enabled and t.time()>(envoyslastcheck+60):  # 2minutes
-                        self.refreshDataForDev(dev)
-                        envoyslastcheck = t.time()
-                        self.sleep(5)
-                    if dev.enabled and t.time() > (panellastcheck + 200):   # minutes
-                        self.checkThePanels_New(dev)
-                        panellastcheck = t.time()
-                        self.sleep(5)
                     if dev.enabled and t.time() > (panelinventorylastcheck + 300):   # minutes
                         self.checkPanelInventory(dev)
                         self.sleep(5)
                         panelinventorylastcheck = t.time()
+                    elif dev.enabled and t.time() > (panellastcheck + 200):  # minutes
+                        self.checkThePanels_New(dev)
+                        panellastcheck = t.time()
+                        self.sleep(5)
+                    elif dev.enabled and t.time() > (envoyslastcheck + 60):  # 2minutes
+                        self.refreshDataForDev(dev)
+                        envoyslastcheck = t.time()
+                        self.sleep(5)
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyLegacy'):
                     if dev.enabled and t.time()>(envoylegacylastcheck+60):
                         self.legacyRefreshEnvoy(dev)
                         self.sleep(5)
                         envoylegacylastcheck = t.time()
 
-                self.sleep(30)
+                self.sleep(25)
                 if self.WaitInterval>0:
                     self.WaitInterval = 0
                     self.sleep(120)
