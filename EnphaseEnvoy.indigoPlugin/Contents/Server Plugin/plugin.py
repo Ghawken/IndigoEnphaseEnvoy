@@ -121,8 +121,6 @@ class Plugin(indigo.PluginBase):
     def deviceStartComm(self, dev):
         if self.debugLevel >= 2:
             self.debugLog(u"deviceStartComm() method called.")
-
-
         #self.errorLog(unicode(dev.model))
 
         # CHECK IF PANEL - IF PANEL START OFFLINE
@@ -213,7 +211,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('storageWattsNow', value=0)
             dev.updateStateOnServer('storageState', value='Offline')
             dev.updateStateOnServer('storagePercentFull', value=0)
-            #dev.updateStateOnServer('whLifetime', value=0)
+            dev.updateStateOnServer('typeEnvoy', value="unknown")
             dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
         if dev.model == 'Enphase Panel':
             dev.updateStateOnServer('watts', value=0)
@@ -261,6 +259,7 @@ class Plugin(indigo.PluginBase):
             envoylegacylastcheck = t.time()
             panelinventorylastcheck = t.time()
             Anychecklastcheck = t.time()
+            checkEnvoyType = t.time()
 
 ## check main device on startup.
             for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
@@ -277,7 +276,10 @@ class Plugin(indigo.PluginBase):
 # Loop for continuing checks
             while True:
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
-                    if dev.enabled and t.time() > (panelinventorylastcheck + 300):   # minutes
+                    if dev.enabled and t.time() > (checkEnvoyType + 21600 ): ## 6 hours
+                        self.checkEnvoyType(dev)
+                        checkEnvoyType = t.time()
+                    elif dev.enabled and t.time() > (panelinventorylastcheck + 300):   # minutes
                         self.checkPanelInventory(dev)
                         self.sleep(5)
                         panelinventorylastcheck = t.time()
@@ -581,6 +583,16 @@ class Plugin(indigo.PluginBase):
             self.logger.info("Error connecting to info.xml to find Serial Number")
             return False
 
+    def gettheDataChoice(self,dev):
+        envoyType= dev.states["typeEnvoy"]
+        if envoyType == "Metered":
+            return self.getTheData(dev)
+        elif envoyType =="Unmetered":
+            return self.legacyGetTheData(dev)
+        else:
+            self.logger.debug("Awaiting Envoy Type")
+            return None
+
     def getTheData(self, dev):
         """
         The getTheData() method is used to retrieve  API Client Data
@@ -736,8 +748,6 @@ class Plugin(indigo.PluginBase):
                                 dev.updateStateOnServer('modelNo', value=str(devices['part_num']))
                                 dev.updateStateOnServer('producing',   value=devices['producing'])
                                 dev.updateStateOnServer('communicating', value=devices['communicating'])
-
-
                     return
 
             except Exception as error:
@@ -857,7 +867,7 @@ class Plugin(indigo.PluginBase):
                  self.errorLog(u"Saving Values errors:"+str(error.message))
 
 
-    def parseStateValues(self, dev):
+    def parseStateValues(self, dev,data):
         """
         The parseStateValues() method walks through the dict and assigns the
         corresponding value to each device state.
@@ -871,14 +881,16 @@ class Plugin(indigo.PluginBase):
         #     u'rmsCurrent': 0}]}
 
         #self.finalDict = testdata2
-
         #testdata = {u'production': [{u'activeCount': 32, u'wNow': 303, u'readingTime': 1484494980, u'type': u'inverters', u'whLifetime': 1799748.9794444444}, {u'whToday': 137.262, u'pwrFactor': 0.53, u'readingTime': 1484494980, u'activeCount': 1, u'rmsVoltage': 248.215, u'reactPwr': 490.766, u'whLifetime': 1321326.262, u'apprntPwr': 596.966, u'wNow': 316.044, u'type': u'eim', u'whLastSevenDays': 116064.262, u'rmsCurrent': 4.81}], u'consumption': [{u'varhLagLifetime': 913691.045, u'rmsVoltage': 248.132, u'pwrFactor': 0.35, u'whToday': 6075.567, u'vahToday': 8331.054, u'varhLeadLifetime': 912659.572, u'varhLeadToday': 4580.572, u'readingTime': 1484494980, u'activeCount': 1, u'varhLagToday': 4093.045, u'vahLifetime': 2530344.054, u'reactPwr': 402.82, u'whLifetime': 1756854.567, u'apprntPwr': 3780.981, u'wNow': 1337.481, u'type': u'eim', u'whLastSevenDays': 161357.567, u'rmsCurrent': 15.238}]}
         #self.finalDict = testdata
-
-        #testdata3 = {u'production': [{u'activeCount': 32, u'readingTime': 1592320372, u'type': u'inverters', u'whLifetime': 30205473, u'wNow': 6332}, {u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.99, u'readingTime': 1592320555, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': 668.095, u'rmsVoltage': 241.442, u'apprntPwr': 6923.603, u'wNow': 6829.524, u'measurementType': u'production', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 57.352}], u'storage': [{u'readingTime': 0, u'whNow': 0, u'activeCount': 0, u'state': u'idle', u'wNow': 0, u'type': u'acb'}], u'consumption': [{u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.49, u'readingTime': 1592320555, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': -668.095, u'rmsVoltage': 241.537, u'apprntPwr': 13915.818, u'wNow': 6829.524, u'measurementType': u'total-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 57.614}, {u'varhLagLifetime': 0.0, u'whToday': 0, u'vahToday': 0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.0, u'readingTime': 1592320555, u'whLastSevenDays': 0, u'varhLeadToday': 0, u'activeCount': 0, u'varhLagToday': 0, u'vahLifetime': 0.0, u'reactPwr': 0.0, u'rmsVoltage': 241.632, u'apprntPwr': 31.635, u'wNow': 0.0, u'measurementType': u'net-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 0.262}]}
+        #data = {u'production': [{u'activeCount': 32, u'readingTime': 1592320372, u'type': u'inverters', u'whLifetime': 30205473, u'wNow': 6332}, {u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.99, u'readingTime': 1592320555, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': 668.095, u'rmsVoltage': 241.442, u'apprntPwr': 6923.603, u'wNow': 6829.524, u'measurementType': u'production', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 57.352}], u'storage': [{u'readingTime': 0, u'whNow': 0, u'activeCount': 0, u'state': u'idle', u'wNow': 0, u'type': u'acb'}], u'consumption': [{u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.49, u'readingTime': 1592320555, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': -668.095, u'rmsVoltage': 241.537, u'apprntPwr': 13915.818, u'wNow': 6829.524, u'measurementType': u'total-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 57.614}, {u'varhLagLifetime': 0.0, u'whToday': 0, u'vahToday': 0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.0, u'readingTime': 1592320555, u'whLastSevenDays': 0, u'varhLeadToday': 0, u'activeCount': 0, u'varhLagToday': 0, u'vahLifetime': 0.0, u'reactPwr': 0.0, u'rmsVoltage': 241.632, u'apprntPwr': 31.635, u'wNow': 0.0, u'measurementType': u'net-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 0.262}]}
         #roque data
-        #testdata4 = {"production":[{"type":"inverters","activeCount":26,"readingTime":1583573417,"wNow":1735,"whLifetime":26678},{"type":"eim","activeCount":0,"measurementType":"production","readingTime":1583573476,"wNow":-2.835,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.362,"rmsVoltage":717.437,"reactPwr":0.829,"apprntPwr":86.904,"pwrFactor":-0.06,"whToday":0.0,"whLastSevenDays":0.0,"vahToday":0.0,"varhLeadToday":0.0,"varhLagToday":0.0}],"consumption":[{"type":"eim","activeCount":0,"measurementType":"total-consumption","readingTime":1583573476,"wNow":-1.149,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.825,"rmsVoltage":717.603,"reactPwr":-1.6,"apprntPwr":592.15,"pwrFactor":-0.0,"whToday":0.0,"whLastSevenDays":0.0,"vahToday":0.0,"varhLeadToday":0.0,"varhLagToday":0.0},{"type":"eim","activeCount":0,"measurementType":"net-consumption","readingTime":1583573476,"wNow":1.686,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.463,"rmsVoltage":717.769,"reactPwr":-0.771,"apprntPwr":110.751,"pwrFactor":0.05,"whToday":0,"whLastSevenDays":0,"vahToday":0,"varhLeadToday":0,"varhLagToday":0}],"storage":[{"type":"acb","activeCount":0,"readingTime":0,"wNow":0,"whNow":0,"state":"idle"}]}
+        #data = {u'production': [{u'activeCount': 32, u'readingTime': 1628529482, u'type': u'inverters', u'whLifetime': 46071778, u'wNow': 3945}, {u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.97, u'readingTime': 1628529514, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': 639.174, u'rmsVoltage': 241.337, u'apprntPwr': 3642.217, u'wNow': 3538.273, u'measurementType': u'production', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 30.183}], u'storage': [{u'readingTime': 0, u'whNow': 0, u'activeCount': 0, u'state': u'idle', u'wNow': 0, u'type': u'acb'}], u'consumption': [{u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.48, u'readingTime': 1628529514, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': -639.174, u'rmsVoltage': 241.376, u'apprntPwr': 7348.878, u'wNow': 3538.273, u'measurementType': u'total-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 30.446}, {u'varhLagLifetime': 0.0, u'whToday': 0, u'vahToday': 0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.0, u'readingTime': 1628529514, u'whLastSevenDays': 0, u'varhLeadToday': 0, u'activeCount': 0, u'varhLagToday': 0, u'vahLifetime': 0.0, u'reactPwr': -0.0, u'rmsVoltage': 241.415, u'apprntPwr': 31.626, u'wNow': 0.0, u'measurementType': u'net-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 0.263}]}
+
+        #unmetered
+        #data = {u'production': [{u'activeCount': 32, u'readingTime': 1628431003, u'type': u'inverters', u'whLifetime': 46011634, u'wNow': 4706}, {u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.98, u'readingTime': 1628431183, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': 662.891, u'rmsVoltage': 244.078, u'apprntPwr': 4348.023, u'wNow': 4257.374, u'measurementType': u'production', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 35.615}], u'storage': [{u'readingTime': 0, u'whNow': 0, u'activeCount': 0, u'state': u'idle', u'wNow': 0, u'type': u'acb'}], u'consumption': [{u'varhLagLifetime': 0.0, u'whToday': 0.0, u'vahToday': 0.0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.49, u'readingTime': 1628431183, u'whLastSevenDays': 0.0, u'varhLeadToday': 0.0, u'activeCount': 0, u'varhLagToday': 0.0, u'vahLifetime': 0.0, u'reactPwr': -662.891, u'rmsVoltage': 244.026, u'apprntPwr': 8754.438, u'wNow': 4257.374, u'measurementType': u'total-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 35.875}, {u'varhLagLifetime': 0.0, u'whToday': 0, u'vahToday': 0, u'varhLeadLifetime': 0.0, u'pwrFactor': 0.0, u'readingTime': 1628431183, u'whLastSevenDays': 0, u'varhLeadToday': 0, u'activeCount': 0, u'varhLagToday': 0, u'vahLifetime': 0.0, u'reactPwr': 0.0, u'rmsVoltage': 243.974, u'apprntPwr': 31.778, u'wNow': 0.0, u'measurementType': u'net-consumption', u'type': u'eim', u'whLifetime': 0.0, u'rmsCurrent': 0.26}]}      #testdata4 = {"production":[{"type":"inverters","activeCount":26,"readingTime":1583573417,"wNow":1735,"whLifetime":26678},{"type":"eim","activeCount":0,"measurementType":"production","readingTime":1583573476,"wNow":-2.835,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.362,"rmsVoltage":717.437,"reactPwr":0.829,"apprntPwr":86.904,"pwrFactor":-0.06,"whToday":0.0,"whLastSevenDays":0.0,"vahToday":0.0,"varhLeadToday":0.0,"varhLagToday":0.0}],"consumption":[{"type":"eim","activeCount":0,"measurementType":"total-consumption","readingTime":1583573476,"wNow":-1.149,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.825,"rmsVoltage":717.603,"reactPwr":-1.6,"apprntPwr":592.15,"pwrFactor":-0.0,"whToday":0.0,"whLastSevenDays":0.0,"vahToday":0.0,"varhLeadToday":0.0,"varhLagToday":0.0},{"type":"eim","activeCount":0,"measurementType":"net-consumption","readingTime":1583573476,"wNow":1.686,"whLifetime":0.0,"varhLeadLifetime":0.0,"varhLagLifetime":0.0,"vahLifetime":0.0,"rmsCurrent":0.463,"rmsVoltage":717.769,"reactPwr":-0.771,"apprntPwr":110.751,"pwrFactor":0.05,"whToday":0,"whLastSevenDays":0,"vahToday":0,"varhLeadToday":0,"varhLagToday":0}],"storage":[{"type":"acb","activeCount":0,"readingTime":0,"wNow":0,"whNow":0,"state":"idle"}]}
         #JohnMcEvoy
+        #data =  {u'wattHoursLifetime': 46011634, u'wattHoursToday': 3876, u'wattsNow': 4707, u'wattHoursSevenDays': 294504}
 
         #self.finalDict = testdata4
 
@@ -887,71 +899,53 @@ class Plugin(indigo.PluginBase):
             #self.debugLog(unicode(self.finalDict))
 
         try:
-
-            self.logger.debug("Running check for Metered Envoy-S versus Unmetered...")
-
+            envoyType = dev.states['typeEnvoy']
             consumptionWatts =0
             productionWatts =0
-            check = "production" in self.finalDict
-
-            if check:
-                if len(self.finalDict['production'])>1 and int(self.finalDict['production'][1]['whLifetime'])==0:
-                        self.logger.debug("whLifetime Checked: Equals Zero.  Seems Unmetered version.")
-                        self.EnvoyStype = "U"
-                        self.logger.debug("Calling Enphase API for additional data...")
-                        self.sleep(2)
-                        unmeteredData = self.legacyGetTheData(dev)
-                        self.sleep(15)
-                        ## Unfortunately this endpoint doesn't report in my two case examples
-                        # consumptionData = self.getAPIDataConsumption(dev)
-                else:
-                    self.EnvoyStype = "M"
-                    self.logger.debug("Envoy-S Metered Version Found.  Continuing.")
-
             # Check that finalDict contains a production list
-            if check:
-                dev.updateStateOnServer('numberInverters', value=int(self.finalDict['production'][0]['activeCount']))
+            if "production" in data:
+                dev.updateStateOnServer('numberInverters', value=int(data['production'][0]['activeCount']))
+            else:
+                if self.debugLevel >= 2:
+                    self.debugLog(u"no Production result found.")
+                dev.updateStateOnServer('numberInverters', value=0)
 
-                if len(self.finalDict['production'])>1:
-                    if self.EnvoyStype=="M":
-                        dev.updateStateOnServer('productionWattsNow', value=int(self.finalDict['production'][1]['wNow']))
-                        productionWatts = int(self.finalDict['production'][1]['wNow'])
-                        dev.updateStateOnServer('production7days', value=int(self.finalDict['production'][1]['whLastSevenDays']))
-                        dev.updateStateOnServer('productionWattsToday', value=int(self.finalDict['production'][1]['whToday']))
-                        dev.updateStateOnServer('productionwhLifetime', value=int(self.finalDict['production'][1]['whLifetime']))
-                    elif self.EnvoyStype == "U":
-                        dev.updateStateOnServer('productionWattsNow', value=int(unmeteredData['wattsNow']))
-                        productionWatts = int(unmeteredData['wattsNow'])
-                        if unmeteredData is not None:
-                            if 'wattHoursSevenDays' in unmeteredData:
-                                dev.updateStateOnServer('production7days', value=int(unmeteredData['wattHoursSevenDays']))
-                            if 'wattHoursToday' in unmeteredData:
-                                dev.updateStateOnServer('productionWattsToday', value=int(unmeteredData['wattHoursToday']))
-                            if 'wattHoursLifetime' in unmeteredData:
-                                dev.updateStateOnServer('productionwhLifetime', value=int(unmeteredData['wattHoursLifetime']))
+            if envoyType == "Metered":
+                if len(data['production']) > 1:
+                    dev.updateStateOnServer('productionWattsNow', value=int(data['production'][1]['wNow']))
+                    productionWatts = int(data['production'][1]['wNow'])
+                    dev.updateStateOnServer('production7days', value=int(data['production'][1]['whLastSevenDays']))
+                    dev.updateStateOnServer('productionWattsToday', value=int(data['production'][1]['whToday']))
+                    dev.updateStateOnServer('productionwhLifetime', value=int(data['production'][1]['whLifetime']))
                 else:
                     if self.debugLevel >= 2:
                         self.debugLog(u"no Production 2 result found.")
                     dev.updateStateOnServer('productionWattsNow', value=0)
                     dev.updateStateOnServer('production7days',value=0)
                     dev.updateStateOnServer('productionWattsToday',value=0)
-            else:
-                if self.debugLevel >= 2:
-                    self.debugLog(u"no Production result found.")
-                dev.updateStateOnServer('numberInverters', value=0)
 
-            check = "consumption" in self.finalDict
+            elif envoyType == "Unmetered":
+                if "wattsNow" in data:
+                    dev.updateStateOnServer('productionWattsNow', value=int(data['wattsNow']))
+                    productionWatts = int(data['wattsNow'])
+                    if data is not None:
+                        if 'wattHoursSevenDays' in data:
+                            dev.updateStateOnServer('production7days', value=int(data['wattHoursSevenDays']))
+                        if 'wattHoursToday' in data:
+                            dev.updateStateOnServer('productionWattsToday', value=int(data['wattHoursToday']))
+                        if 'wattHoursLifetime' in data:
+                            dev.updateStateOnServer('productionwhLifetime', value=int(data['wattHoursLifetime']))
 
-            if check:
-                if self.EnvoyStype=="M":
-                    dev.updateStateOnServer('consumptionWattsNow', value=int(self.finalDict['consumption'][0]['wNow']))
-                    consumptionWatts = int(self.finalDict['consumption'][0]['wNow'])
-                    dev.updateStateOnServer('consumption7days', value=int(self.finalDict['consumption'][0]['whLastSevenDays']))
-                    dev.updateStateOnServer('consumptionwhLifetime',  value=int(self.finalDict['consumption'][0]['whLifetime']))
-                    dev.updateStateOnServer('consumptionWattsToday', value=int(self.finalDict['consumption'][0]['whToday']))
-                    if len(self.finalDict['consumption'])>1:
-                        dev.updateStateOnServer('netConsumptionWattsNow', value=int(self.finalDict['consumption'][1]['wNow']))
-                        dev.updateStateOnServer('netconsumptionwhLifetime',value=int(self.finalDict['consumption'][1]['whLifetime']))
+            if envoyType == "Metered":
+                if "consumption" in data:
+                    dev.updateStateOnServer('consumptionWattsNow', value=int(data['consumption'][0]['wNow']))
+                    consumptionWatts = int(data['consumption'][0]['wNow'])
+                    dev.updateStateOnServer('consumption7days', value=int(data['consumption'][0]['whLastSevenDays']))
+                    dev.updateStateOnServer('consumptionwhLifetime',  value=int(data['consumption'][0]['whLifetime']))
+                    dev.updateStateOnServer('consumptionWattsToday', value=int(data['consumption'][0]['whToday']))
+                    if len(data['consumption'])>1:
+                        dev.updateStateOnServer('netConsumptionWattsNow', value=int(data['consumption'][1]['wNow']))
+                        dev.updateStateOnServer('netconsumptionwhLifetime',value=int(data['consumption'][1]['whLifetime']))
                     else:
                         if self.debugLevel >=2:
                             self.debugLog(u'No netConsumption being reporting.....Calculating....')
@@ -959,7 +953,7 @@ class Plugin(indigo.PluginBase):
                         #
                         netConsumption = int(consumptionWatts) - int(productionWatts)
                         dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
-                elif self.EnvoyStype=="U":
+            elif envoyType == "Unmetered":
                     # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
                     # not consumption data appears possible
                     dev.updateStateOnServer('consumptionWattsNow',value=0,uiValue="Not Reported")
@@ -993,12 +987,12 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >= 2:
                     self.debugLog(u"no Consumption result found.")
 
-            check = "storage" in self.finalDict
-            if check:
-                dev.updateStateOnServer('storageActiveCount', value=int(self.finalDict['storage'][0]['activeCount']))
-                dev.updateStateOnServer('storageWattsNow', value=int(self.finalDict['storage'][0]['wNow']))
-                dev.updateStateOnServer('storageState', value=self.finalDict['storage'][0]['state'])
-                #dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
+            if envoyType == "Metered":
+                if "storage" in data:
+                    dev.updateStateOnServer('storageActiveCount', value=int(data['storage'][0]['activeCount']))
+                    dev.updateStateOnServer('storageWattsNow', value=int(data['storage'][0]['wNow']))
+                    dev.updateStateOnServer('storageState', value=data['storage'][0]['state'])
+                    #dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
             else:
                 if self.debugLevel >= 2:
                     self.debugLog(u"no Storage result found.")
@@ -1006,14 +1000,16 @@ class Plugin(indigo.PluginBase):
 
             update_time = t.strftime("%m/%d/%Y at %H:%M")
             dev.updateStateOnServer('deviceLastUpdated', value=update_time)
-            reading_time = datetime.datetime.fromtimestamp(self.finalDict['production'][1]['readingTime'])
+            if envoyType == "Metered":
+                reading_time = datetime.datetime.fromtimestamp(data['production'][1]['readingTime'])
             #format_reading_time = t.strftime()
-            dev.updateStateOnServer('readingTime', value=str(reading_time))
-            timeDifference = int(t.time() - t.mktime(reading_time.timetuple()))
-            dev.updateStateOnServer('secsSinceReading', value=timeDifference)
+                dev.updateStateOnServer('readingTime', value=str(reading_time))
+                timeDifference = int(t.time() - t.mktime(reading_time.timetuple()))
+                dev.updateStateOnServer('secsSinceReading', value=timeDifference)
             if self.debugLevel >= 2:
                 self.debugLog(u"State Image Selector:"+unicode(dev.displayStateImageSel))
-            if self.EnvoyStype == "M":
+
+            if envoyType == "Metered":
                 if productionWatts >= consumptionWatts and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
                     #Generating more Power - and a change
                     # If Generating Power - but device believes importing - recent change unpdate to refleect
@@ -1030,13 +1026,12 @@ class Plugin(indigo.PluginBase):
                     #Must be opposite or and again a change only
                     if self.debugLevel >= 2:
                         self.debugLog(u'**CHANGED**: Importing power')
-
                     dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
                     dev.updateStateOnServer('generatingPower', value=False)
                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
                     if self.debugLevel >= 2:
                         self.debugLog(u"State Image Selector:" + unicode(dev.displayStateImageSel))
-            elif self.EnvoyStype == "U":
+            elif envoyType == "Unmetered":
             # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
             # not consumption data appears possible
                 self.logger.debug("Envoy Unmetered equivalent used for Status:")
@@ -1052,6 +1047,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('generatingPower', value=False, uiValue="No Power Production")
                     dev.updateStateOnServer('powerStatus', value="idle", uiValue="Not Producing Energy")
                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+
             for costdev in indigo.devices.itervalues('self.EnphaseEnvoyCostDevice'):
                 if self.debugLevel >2:
                     self.debugLog(u'Updating Cost Device')
@@ -1060,6 +1056,7 @@ class Plugin(indigo.PluginBase):
         except Exception as error:
              if self.debugLevel >= 2:
                  self.errorLog(u"Saving Values errors:"+unicode(error.message) + unicode(error) )
+                 self.logger.exception("Saving Values Exception")
 
     def updateCostDevice(self, dev, costdev):
         if self.debugLevel>=2:
@@ -1262,6 +1259,23 @@ class Plugin(indigo.PluginBase):
             self.errorLog(unicode(error.message))
             return False
 
+    def checkEnvoyType(self,dev):
+        self.logger.debug("Check Envoy Type Called...")
+        if self.debugLevel >= 2:
+            self.debugLog(u"Type of Envoy Checking...: {0}".format(dev.name))
+        data = self.getTheData(dev)
+        if "production" in data:
+            if len(data['production']) > 1 and int(data['production'][1]['whLifetime']) == 0:
+                self.logger.debug("whLifetime Checked: Equals Zero.  Seems Unmetered version.")
+                dev.updateStateOnServer('typeEnvoy', value="Unmetered")
+                return
+            else:
+                dev.updateStateOnServer('typeEnvoy', value="Metered")
+                self.logger.debug("Envoy-S Metered Version Found.  Continuing.")
+                self.parseStateValues(dev, data)
+                return
+        t.sleep(20)
+
     def refreshDataForDev(self, dev):
         if dev.configured:
             if self.debugLevel >= 2:
@@ -1275,20 +1289,33 @@ class Plugin(indigo.PluginBase):
                     # self.errorLog(unicode(dev.lastChanged))
                 # Get the data.
                 # If device is offline wait for 60 seconds until rechecking
+
+                if dev.states['typeEnvoy']== "" or dev.states['typeEnvoy']=="unknown":
+                    if self.debugLevel >= 2:
+                        self.debugLog(u"Type of Envoy Checking...: {0}".format(dev.name))
+                    data = self.getTheData(dev)
+                    ## roque test data returns unmetered
+                    if "production" in data:
+                        if len(data['production']) > 1 and int( data['production'][1]['whLifetime']) == 0:
+                            self.logger.debug("whLifetime Checked: Equals Zero.  Seems Unmetered version.")
+                            dev.updateStateOnServer('typeEnvoy', value="Unmetered")
+                            return
+                        else:
+                            dev.updateStateOnServer('typeEnvoy', value="Metered")
+                            self.logger.debug("Envoy-S Metered Version Found.  Continuing.")
+                            self.parseStateValues(dev, data)
+                            return
+                    t.sleep(20)
                 if dev.states['deviceIsOnline'] == False and timeDifference >= 180:
                     if self.debugLevel >= 2:
                         self.debugLog(u"Offline: Refreshing device: {0}".format(dev.name))
-                    self.finalDict = self.getTheData(dev)
-                # if device online normal time
-                if dev.states['deviceIsOnline']:
+                    data = self.gettheDataChoice(dev)
+                    self.parseStateValues(dev, data)
+                elif dev.states['deviceIsOnline']:
                     if self.debugLevel >= 2:
                         self.debugLog(u"Online: Refreshing device: {0}".format(dev.name))
-                    self.finalDict = self.getTheData(dev)
-                    #ignore panel level data until later
-                    #self.PanelDict = self.getthePanels(dev)
-                    # Put the final values into the device states - only if online
-                if dev.states['deviceIsOnline']:
-                    self.parseStateValues(dev)
+                    data = self.gettheDataChoice(dev)
+                    self.parseStateValues(dev, data)
             else:
                 if self.debugLevel >= 2:
                     self.debugLog(u"    Disabled: {0}".format(dev.name))

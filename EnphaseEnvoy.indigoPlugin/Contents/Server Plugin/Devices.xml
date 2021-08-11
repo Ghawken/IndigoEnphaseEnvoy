@@ -81,6 +81,11 @@
         <TriggerLabel>Device Last Updated</TriggerLabel>
         <ControlPageLabel>Device Last Updated</ControlPageLabel>
            </State>
+      <State id="typeEnvoy">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Type of Envoy Device</TriggerLabel>
+        <ControlPageLabel>Type of Envoy Device</ControlPageLabel>
+           </State>
 
       <State id="numberInverters">
         <ValueType>Number</ValueType>
