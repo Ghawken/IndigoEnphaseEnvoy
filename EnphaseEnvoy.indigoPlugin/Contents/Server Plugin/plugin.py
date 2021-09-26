@@ -903,6 +903,12 @@ class Plugin(indigo.PluginBase):
             consumptionWatts =0
             productionWatts =0
             # Check that finalDict contains a production list
+
+            if data is None:
+                if self.debugLevel >= 2:
+                    self.debugLog(u"no data found.")
+                return
+
             if "production" in data:
                 dev.updateStateOnServer('numberInverters', value=int(data['production'][0]['activeCount']))
             else:
