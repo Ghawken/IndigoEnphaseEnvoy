@@ -1300,7 +1300,12 @@ class Plugin(indigo.PluginBase):
                     if self.debugLevel >= 2:
                         self.debugLog(u"Type of Envoy Checking...: {0}".format(dev.name))
                     data = self.getTheData(dev)
+
                     ## roque test data returns unmetered
+                    if data is None:
+                        self.logger.debug(u"Data is Nonetype.  Returning.")
+                        return
+
                     if "production" in data:
                         if len(data['production']) > 1 and int( data['production'][1]['whLifetime']) == 0:
                             self.logger.debug("whLifetime Checked: Equals Zero.  Seems Unmetered version.")
@@ -1316,6 +1321,7 @@ class Plugin(indigo.PluginBase):
                     if self.debugLevel >= 2:
                         self.debugLog(u"Offline: Refreshing device: {0}".format(dev.name))
                     data = self.gettheDataChoice(dev)
+
                     self.parseStateValues(dev, data)
                 elif dev.states['deviceIsOnline']:
                     if self.debugLevel >= 2:
