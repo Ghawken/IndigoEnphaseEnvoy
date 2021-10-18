@@ -111,7 +111,7 @@
         <State id="productionWattsMaxWeek">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power Production Max Week (watts)</TriggerLabel>
-        <ControlPageLabel>Power Production Week Today (watts)</ControlPageLabel>
+        <ControlPageLabel>Power Production Max Week (watts)</ControlPageLabel>
       </State>
         <State id="productionWattsMaxEver">
         <ValueType>Number</ValueType>
