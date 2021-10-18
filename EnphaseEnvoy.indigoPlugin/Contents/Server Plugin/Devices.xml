@@ -103,6 +103,21 @@
         <TriggerLabel>Power Production (watts)</TriggerLabel>
         <ControlPageLabel>Power Production (watts)</ControlPageLabel>
       </State>
+            <State id="productionWattsMaxToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Max Today (watts)</TriggerLabel>
+        <ControlPageLabel>Power Production Max Today (watts)</ControlPageLabel>
+      </State>
+        <State id="productionWattsMaxWeek">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Max Week (watts)</TriggerLabel>
+        <ControlPageLabel>Power Production Week Today (watts)</ControlPageLabel>
+      </State>
+        <State id="productionWattsMaxEver">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Production Max Ever (watts)</TriggerLabel>
+        <ControlPageLabel>Power Production Max Ever (watts)</ControlPageLabel>
+      </State>
         <State id="panelLastUpdatedUTC">
         <ValueType>Number</ValueType>
         <TriggerLabel>UTC Time of last Panel Check</TriggerLabel>

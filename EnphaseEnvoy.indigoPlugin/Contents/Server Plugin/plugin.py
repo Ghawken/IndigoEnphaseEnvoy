@@ -19,6 +19,8 @@ import os
 import shutil
 import flatdict
 import re
+import logging
+import datetime
 
 from requests.auth import HTTPDigestAuth
 
@@ -260,7 +262,7 @@ class Plugin(indigo.PluginBase):
             panelinventorylastcheck = t.time()
             Anychecklastcheck = t.time()
             checkEnvoyType = t.time()
-
+            checkdateTime = t.time()
 ## check main device on startup.
             for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
                 if self.debugLevel>=2:
@@ -276,6 +278,11 @@ class Plugin(indigo.PluginBase):
 # Loop for continuing checks
             while True:
                 for dev in indigo.devices.itervalues('self.EnphaseEnvoyDevice'):
+                    if dev.enabled and t.time() > (checkdateTime+ 1320):  ##22 minutes --
+                        ## Checking current time/date
+                        self.checkDayTime(dev)
+                        checkdateTime = t.time()
+
                     if dev.enabled and t.time() > (checkEnvoyType + 21600 ): ## 6 hours
                         self.checkEnvoyType(dev)
                         checkEnvoyType = t.time()
@@ -315,6 +322,17 @@ class Plugin(indigo.PluginBase):
             self.WaitInterval = 60
             pass
 
+    def checkDayTime(self, device):
+        try:
+            today = datetime.datetime.today()
+
+            if today.timetz().hour == 0:  ## midnight
+                device.updateStateOnServer('productionWattsMaxToday', value=int(0))
+                if today.isoweekday()==7: ## Its Sunday...
+                    device.updateStateOnServer('productionWattsMaxWeek', value=int(0))
+
+        except:
+            self.logger.exception("Caught Exception")
 
     def shutdown(self):
         if self.debugLevel >= 2:
@@ -866,6 +884,27 @@ class Plugin(indigo.PluginBase):
              if self.debugLevel >= 2:
                  self.errorLog(u"Saving Values errors:"+str(error.message))
 
+    def setproductionMax(self, device, currentproduction):
+        try:
+            maxwattsinDeviceToday = int(device.states['productionWattsMaxToday'])
+            maxwattsinDeviceWeek = int(device.states['productionWattsMaxWeek'])
+            maxwattsinDeviceEver = int(device.states['productionWattsMaxEver'])
+
+            if currentproduction >= maxwattsinDeviceToday:
+                ## Max has been reached currently
+                device.updateStateOnServer('productionWattsMaxToday', value=int(currentproduction))
+            if currentproduction >= maxwattsinDeviceWeek:
+                ## Max has been reached currently
+                device.updateStateOnServer('productionWattsMaxWeek', value=int(currentproduction))
+            if currentproduction >= maxwattsinDeviceEver:
+                ## Max has been reached currently
+                device.updateStateOnServer('productionWattsMaxEver', value=int(currentproduction))
+
+
+        except Exception as error:
+            if self.debugLevel >=2:
+                self.logger.exception("Caught Exception")
+
 
     def parseStateValues(self, dev,data):
         """
@@ -920,6 +959,7 @@ class Plugin(indigo.PluginBase):
                 if len(data['production']) > 1:
                     dev.updateStateOnServer('productionWattsNow', value=int(data['production'][1]['wNow']))
                     productionWatts = int(data['production'][1]['wNow'])
+
                     dev.updateStateOnServer('production7days', value=int(data['production'][1]['whLastSevenDays']))
                     dev.updateStateOnServer('productionWattsToday', value=int(data['production'][1]['whToday']))
                     dev.updateStateOnServer('productionwhLifetime', value=int(data['production'][1]['whLifetime']))
@@ -1015,7 +1055,12 @@ class Plugin(indigo.PluginBase):
             if self.debugLevel >= 2:
                 self.debugLog(u"State Image Selector:"+unicode(dev.displayStateImageSel))
 
+            ##
+            self.setproductionMax(dev, productionWatts)
+
+
             if envoyType == "Metered":
+
                 if productionWatts >= consumptionWatts and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
                     #Generating more Power - and a change
                     # If Generating Power - but device believes importing - recent change unpdate to refleect
