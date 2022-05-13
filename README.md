@@ -60,6 +60,5 @@ This will generate a PanelDevice for each Panel you have installed.
 
 This shows current Panel output and any status reports and custom states as you can see.
 
-This is still a work in progress, and expect some ongoing modifications(in fact can already see some typos on the pictures posted :<) - but hopefully useful for someone.
 
 Glenn
