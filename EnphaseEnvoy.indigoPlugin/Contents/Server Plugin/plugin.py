@@ -646,12 +646,12 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getTheData PRODUCTION METHOD method called.")
 
         try:
-            url = 'http://' + dev.pluginProps['sourceXML'] + '/production.json'
+            url = f"http://{dev.pluginProps['sourceXML']}/production.json"
             headers = self.create_headers(url, dev)
-            r = requests.get(url,timeout=25, headers=headers, allow_redirects=False)
+            r = requests.get(url, timeout=35, headers=headers, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
-                self.debugLog(u"Result:" + str(result))
+                self.debugLog(f"Result:{result}")
 
             dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
             dev.setErrorStateOnServer(None)
@@ -754,7 +754,7 @@ class Plugin(indigo.PluginBase):
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+str(error))
                 if self.debugLevel >= 2:
-                    self.debugLog(u"Device is offline. No data to return. ")
+                    self.logger.debug(u"Device is offline. No data to return. ", exc_info=True)
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 dev.setErrorStateOnServer(u'Offline')
                 result = None
@@ -857,7 +857,11 @@ class Plugin(indigo.PluginBase):
                     r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), timeout=30, allow_redirects=False)
                 result = r.json()
                 if self.debugLevel >= 2:
-                    self.debugLog(u"Inverter Result:" + str(result))
+                    self.debugLog(f"Inverter Result:{result}")
+                if "status" in result:
+                    if result["status"] ==  401:
+                        self.logger.info(f"Error getting Panel Data: Error : {result}")
+                        return None
                 return result
 
             except requests.exceptions.ReadTimeout as e:
@@ -878,7 +882,7 @@ class Plugin(indigo.PluginBase):
 
                 indigo.server.log(u"Error connecting to Device:" + dev.name)
                 if self.debugLevel >= 2:
-                    self.logger.exception(u"Device is offline. No data to return. ")
+                    self.logger.debug(u"Device is offline. No data to return. ", exc_info=True)
                 # dev.updateStateOnServer('deviceTimestamp', value=t.time())
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 for paneldevice in indigo.devices.iter('self.EnphasePanelDevice'):
