@@ -363,13 +363,28 @@ class Plugin(indigo.PluginBase):
         """Check if json has keys for both production and consumption"""
         return "production" in json and "consumption" in json
 
+    def create_headers(self, url, dev):
+        self.logger.debug(f"Create_Headers called for {url} and device.name {dev.name} ")
+        headers = {}
+        use_token = dev.pluginProps.get('use_token', False)
+        auth_token = dev.pluginProps.get('auth_token', "")
+        self.logger.debug(f"Use_token: {use_token} and auth_token equals {auth_token}")
+        if use_token and auth_token !="":
+            headers = {"Accept": "application/json", "Authorization": "Bearer "+auth_token}
+            self.logger.debug(f"Using Headers: {headers}")
+            return headers
+        else:
+            return {}
+
+
     def detect_model(self, dev):
         """Method to determine if the Envoy supports consumption values or
          only production"""
         self.endpoint_url = "http://{}/production.json".format(dev.pluginProps['sourceXML'])
         self.logger.debug("trying Endpoint:"+str(self.endpoint_url))
-        response = requests.get(
-            self.endpoint_url, timeout=15, allow_redirects=False)
+
+        headers =  self.create_headers(self.endpoint_url, dev)
+        response = requests.get(  self.endpoint_url, timeout=15, headers={},allow_redirects=False)
         if response.status_code == 200 and self.hasProductionAndConsumption(response.json()):
             # Okay - this is Envoy S or Envoy-S Metered
             # Some have lots of blanks, need a new device type
@@ -380,8 +395,8 @@ class Plugin(indigo.PluginBase):
         else:
             self.endpoint_url = "http://{}/api/v1/production".format(dev.pluginProps['sourceXML'])
             self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
-            response = requests.get(
-                self.endpoint_url, timeout=15, allow_redirects=False)
+            headers = self.create_headers(self.endpoint_url, dev)
+            response = requests.get(  self.endpoint_url, timeout=15, headers=headers,allow_redirects=False)
             if response.status_code == 200:
                 self.endpoint_type = "P"       # Envoy-C, production only
                 self.logger.debug("Success with EndPoint: "+ str(self.endpoint_url))
@@ -389,8 +404,8 @@ class Plugin(indigo.PluginBase):
             else:
                 self.endpoint_url = "http://{}/production".format(dev.pluginProps['sourceXML'])
                 self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
-                response = requests.get(
-                    self.endpoint_url, timeout=15, allow_redirects=False)
+                headers = self.create_headers(self.endpoint_url, dev)
+                response = requests.get(  self.endpoint_url, timeout=15, headers=headers, allow_redirects=False)
                 if response.status_code == 200:
                     self.endpoint_type = "P0"       # older Envoy-C
                     self.logger.debug("Success with EndPoint: " + str(self.endpoint_url))
@@ -593,17 +608,25 @@ class Plugin(indigo.PluginBase):
         """Method to get last six digits of Envoy serial number for auth"""
         self.logger.debug("Get_Serial_Number_called. ")
 
-        try:
-            response = requests.get( "http://{}/info.xml".format(dev.pluginProps['sourceXML']),
-                timeout=30, allow_redirects=False)
-            if len(response.text) > 0:
-                sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
-                self.serial_number_last_six = sn
-                self.logger.debug("Found Serial Number:"+str(self.serial_number_last_six))
-                return True
-        except requests.exceptions.ConnectionError:
-            self.logger.info("Error connecting to info.xml to find Serial Number")
-            return False
+        serial_num = dev.pluginProps.get("serial_number", "")
+        if serial_num == "":
+            self.logger.info("Serial Number not entered in device.  Attempt to find..")
+            try:
+                url = "http://{}/info.xml".format(dev.pluginProps['sourceXML'])
+                headers = self.create_headers(url, dev)
+                response = requests.get( url, timeout=30, headers=headers, allow_redirects=False)
+                if len(response.text) > 0:
+                    sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
+                    self.serial_number_last_six = sn
+                    self.logger.debug("Found Serial Number:"+str(self.serial_number_last_six))
+                    return True
+            except requests.exceptions.ConnectionError:
+                self.logger.info("Error connecting to info.xml to find Serial Number")
+                return False
+        else:
+            self.logger.info("Using Serial Number entered manually in device settings.")
+            self.serial_number_last_six = serial_num[-6:]
+            return serial_num[-6:]
 
     def gettheDataChoice(self,dev):
         envoyType= dev.states["typeEnvoy"]
@@ -624,7 +647,8 @@ class Plugin(indigo.PluginBase):
 
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/production.json'
-            r = requests.get(url,timeout=25, allow_redirects=False)
+            headers = self.create_headers(url, dev)
+            r = requests.get(url,timeout=25, headers=headers, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -639,7 +663,7 @@ class Plugin(indigo.PluginBase):
             indigo.server.log(u"Error connecting to Device:" + str(dev.name) +" Error is:"+str(error))
             self.WaitInterval = 60
             if self.debugLevel >= 2:
-                self.debugLog(u"Device is offline. No data to return. ")
+                self.logger.debug(u"Device is offline. No data to return. ", exc_info=True)
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
             dev.updateStateOnServer('powerStatus', value = 'offline')
             dev.setErrorStateOnServer(u'Offline')
@@ -655,7 +679,8 @@ class Plugin(indigo.PluginBase):
 
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production'
-            r = requests.get(url,timeout=15 , allow_redirects=False)
+            headers = self.create_headers(url, dev)
+            r = requests.get(url,timeout=15 ,headers=headers, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -687,7 +712,8 @@ class Plugin(indigo.PluginBase):
 
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/consumption'
-            r = requests.get(url,timeout=15,  allow_redirects=False)
+            headers = self.create_headers(url, dev)
+            r = requests.get(url,timeout=15,  headers=headers, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -790,7 +816,8 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getInventoryData Enphase Panels method called.")
         try:
             url = 'http://' + dev.pluginProps['sourceXML'] + '/inventory.json'
-            r = requests.get(url, timeout =15, allow_redirects=False)
+            headers = headers
+            r = requests.get(url, timeout =15, headers=headers,allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Inventory Result:" + str(result))
@@ -821,9 +848,13 @@ class Plugin(indigo.PluginBase):
         if dev.states['deviceIsOnline']:
             try:
                 url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production/inverters'
+                headers = self.create_headers(url, dev)
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
-                r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), timeout=30, allow_redirects=False)
+                if len(headers) >0:  # Using token
+                    r = requests.get(url,headers=headers, timeout=30, allow_redirects=False)
+                else:
+                    r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), timeout=30, allow_redirects=False)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(u"Inverter Result:" + str(result))

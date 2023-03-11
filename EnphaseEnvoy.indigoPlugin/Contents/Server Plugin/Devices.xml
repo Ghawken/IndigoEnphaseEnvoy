@@ -12,14 +12,34 @@
       </Field>
        <Field id="sep1" type="separator"/>
 
-      <Field
-        id="sourceXML" type="textfield">
+      <Field id="sourceXML" type="textfield">
         <Label>IP Address</Label>
       </Field>
       <Field id="example3" type="label" fontSize="small" fontColor="black" alignText="right" >
         <Label> Envoy IP - will need to enable static IP address in DHCP Server</Label>
       </Field>
-         <Field id="sep2" type="separator"/>
+         <Field id="sepa2" type="separator"/>
+              <Field id="use_token" type="checkbox" defaultValue="false" tooltip="Use Token to access">
+      <Label>Use Token:</Label>
+      <Description>Required for Firmware >7</Description>
+          </Field>
+                <Field id="serial_number" type="textfield" visibleBindingId="use_token" visibleBindingValue="true">
+        <Label>Serial Number:</Label>
+      </Field>
+      <Field id="exampleaaa3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true">
+        <Label>Manual Enter Serial Number needed</Label>
+      </Field>
+
+        <Field id="auth_token" type="textfield" visibleBindingId="use_token" visibleBindingValue="true">
+        <Label>Token:</Label>
+      </Field>
+      <Field id="exampleaa3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true">
+        <Label>Use Token access needed for firmware >7
+          Create token here: https://entrez.enphaseenergy.com/</Label>
+      </Field>
+
+
+         <Field id="sepaa2" type="separator"/>
 
  <Field id="sep4" type="separator"/>
 
