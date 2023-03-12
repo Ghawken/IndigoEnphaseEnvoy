@@ -1302,7 +1302,14 @@ class Plugin(indigo.PluginBase):
         if self.debugLevel >= 2:
             self.debugLog(u'setStates to nil run')
 
+
+
     def generatePanelDevices(self, valuesDict, typeId, devId):
+        self.WaitInterval = 180
+        panel_thread = threading.Thread(target=self.generatepanels_thread, args=[devId])
+        panel_thread.start()
+
+    def generatepanels_thread(self, devId):
         if self.debugLevel >= 2:
             self.debugLog(u'generate Panels run')
         try:
