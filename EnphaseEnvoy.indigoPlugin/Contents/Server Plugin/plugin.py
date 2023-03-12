@@ -925,7 +925,7 @@ class Plugin(indigo.PluginBase):
         if dev.states['deviceIsOnline']:
             try:
                 headers = self.create_headers( dev)
-                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}api/v1/production/inverters"
+                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production/inverters"
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
                 if len(headers) >0:  # Using token
