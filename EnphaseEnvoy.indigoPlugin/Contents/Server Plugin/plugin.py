@@ -268,10 +268,10 @@ class Plugin(indigo.PluginBase):
        # delete all panel devices first up
         self.logger.info(f"Checking all possible Endpoints...")
         self.logger.info(f"Pausing usual updates for 3 minutes")
-        self.logger.debug(f"valueDict {valuesDict}")
+        #self.logger.debug(f"valueDict {valuesDict}")
         dev = indigo.devices[devId]
         sourceip = valuesDict["sourceXML"]
-        self.WaitInterval = 180
+        self.WaitInterval = 360
         endpoints = [ "http{}://{}/production.json",
                       "http{}://{}/production",
                       "http{}://{}/inventory.json",
@@ -280,12 +280,13 @@ class Plugin(indigo.PluginBase):
                       "http{}://{}/auth/check_jwt",
                       "http{}://{}/ivp/meters",
                       "http{}://{}/ivp/meters/readings","http{}://{}/ivp/livedata/status",
-                      "http{}://{}/ivp/meters/reports/consumption"
+                      "http{}://{}/ivp/meters/reports/consumption",
+                      "http{}://{}/info.xml"
                       ]
-
-        self.https_flag = "s"
+        success = []
+        https_flag = "s"
         for endpoint in endpoints:
-            url = endpoint.format(self.https_flag, sourceip)
+            url = endpoint.format(https_flag, sourceip)
             try:
                 self.sleep(2)
                 self.logger.debug(f"Trying Endpoint:{url}")
@@ -300,9 +301,9 @@ class Plugin(indigo.PluginBase):
             except Exception as ex:
                 self.logger.debug(f"Failed.  Exception: {ex}")
             self.logger.debug("---------------------------------")
-        self.https_flag = ""
+        https_flag = ""
         for endpoint in endpoints:
-            url = endpoint.format(self.https_flag, sourceip)
+            url = endpoint.format(https_flag, sourceip)
             try:
                 self.sleep(2)
                 self.logger.debug(f"Trying Endpoint:{url}")
@@ -318,6 +319,9 @@ class Plugin(indigo.PluginBase):
                 self.logger.debug(f"Failed.  Exception: {ex}")
 
         self.logger.info(" ------- End of Check Endpoints -------")
+        self.WaitInterval = 0
+
+
         return
 
     def runConcurrentThread(self):
@@ -431,14 +435,15 @@ class Plugin(indigo.PluginBase):
         headers = {}
         use_token = dev.pluginProps.get('use_token', False)
         auth_token = dev.pluginProps.get('auth_token', "")
-        self.logger.debug(f"Use_token: {use_token} and auth_token equals {auth_token}")
+        self.logger.debug(f"Use_token: {use_token}")
         if use_token and auth_token !="":
             headers = {"Accept": "application/json", "Authorization": "Bearer "+auth_token}
-            self.logger.debug(f"Using Headers: {headers}")
+            if self.debug:
+                self.logger.debug(f"Using Headers: {headers}")
             self.https_flag = "s"
             return headers
         else:
-            self.http_flag =""
+            self.https_flag =""
             return {}
 
 
