@@ -291,7 +291,7 @@ class Plugin(indigo.PluginBase):
                 self.sleep(2)
                 self.logger.debug(f"Trying Endpoint:{url}")
                 headers = self.create_headers(dev)
-                response = requests.get(url, timeout=25, headers=headers, allow_redirects=False)
+                response = requests.get(url, timeout=25,verify=False,  headers=headers, allow_redirects=True)
                 if response.status_code == 200:
                     self.logger.info(f"Success:  {url}")
                     self.logger.info(f"Response: {response.json()}")
@@ -308,7 +308,7 @@ class Plugin(indigo.PluginBase):
                 self.sleep(2)
                 self.logger.debug(f"Trying Endpoint:{url}")
                 headers = self.create_headers(dev)
-                response = requests.get(url, timeout=25, headers=headers, allow_redirects=False)
+                response = requests.get(url, timeout=25, verify=False, headers=headers, allow_redirects=True)
                 if response.status_code == 200:
                     self.logger.info(f"Success:  {url}")
                     self.logger.info(f"Response: {response.json()}")
@@ -437,7 +437,7 @@ class Plugin(indigo.PluginBase):
         auth_token = dev.pluginProps.get('auth_token', "")
         self.logger.debug(f"Use_token: {use_token}")
         if use_token and auth_token !="":
-            headers = {"Accept": "application/json", "Authorization": "Bearer "+auth_token}
+            headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
             if self.debug:
                 self.logger.debug(f"Using Headers: {headers}")
             self.https_flag = "s"
@@ -454,7 +454,7 @@ class Plugin(indigo.PluginBase):
         self.logger.debug("trying Endpoint:"+str(self.endpoint_url))
         headers =  self.create_headers(dev)
         self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
-        response = requests.get(  self.endpoint_url, timeout=15, headers={},allow_redirects=False)
+        response = requests.get(  self.endpoint_url, timeout=15, verify=False, headers=headers,allow_redirects=True)
         if response.status_code == 200 and self.hasProductionAndConsumption(response.json()):
             # Okay - this is Envoy S or Envoy-S Metered
             # Some have lots of blanks, need a new device type
@@ -468,7 +468,7 @@ class Plugin(indigo.PluginBase):
             self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
             headers = self.create_headers( dev)
             self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
-            response = requests.get(  self.endpoint_url, timeout=15, headers=headers,allow_redirects=False)
+            response = requests.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers,allow_redirects=True)
             if response.status_code == 200:
                 self.endpoint_type = "P"       # Envoy-C, production only
                 self.logger.info("Success with EndPoint: "+ str(self.endpoint_url))
@@ -478,7 +478,7 @@ class Plugin(indigo.PluginBase):
                 self.endpoint_url = "http://{}/production".format(dev.pluginProps['sourceXML'])
                 self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
                 headers = self.create_headers( dev)
-                response = requests.get(  self.endpoint_url, timeout=15, headers=headers, allow_redirects=False)
+                response = requests.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers, allow_redirects=True)
                 if response.status_code == 200:
                     self.endpoint_type = "P0"       # older Envoy-C
                     self.logger.debug("Success with EndPoint: " + str(self.endpoint_url))
@@ -496,7 +496,7 @@ class Plugin(indigo.PluginBase):
         try:
             if self.endpoint_type == "":
                 self.detect_model()
-            response =  requests.get(self.endpoint_url, timeout=15, allow_redirects=False)
+            response =  requests.get(self.endpoint_url, timeout=15,verify=False,  allow_redirects=True)
             if self.endpoint_type == "P" or self.endpoint_type == "PC":
                 return response.json()  # these Envoys have .json
             if self.endpoint_type == "P0":
@@ -688,7 +688,7 @@ class Plugin(indigo.PluginBase):
                 url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
                 headers = self.create_headers( dev)
                 url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
-                response = requests.get( url, timeout=30, headers=headers, allow_redirects=False)
+                response = requests.get( url, timeout=30, headers=headers,verify=False,  allow_redirects=True)
                 if len(response.text) > 0:
                     sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
                     self.serial_number_last_six = sn
@@ -723,7 +723,7 @@ class Plugin(indigo.PluginBase):
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
             headers = self.create_headers( dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
-            r = requests.get(url, timeout=35, headers=headers, allow_redirects=False)
+            r = requests.get(url, timeout=35, headers=headers, verify=False, allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(f"Result:{result}")
@@ -756,7 +756,7 @@ class Plugin(indigo.PluginBase):
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
             headers = self.create_headers(dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
-            r = requests.get(url,timeout=15 ,headers=headers, allow_redirects=False)
+            r = requests.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -790,7 +790,7 @@ class Plugin(indigo.PluginBase):
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
             headers = self.create_headers( dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
-            r = requests.get(url,timeout=15,  headers=headers, allow_redirects=False)
+            r = requests.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -895,7 +895,7 @@ class Plugin(indigo.PluginBase):
             url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
             headers = self.create_headers(dev)
             url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
-            r = requests.get(url, timeout =15, headers=headers,allow_redirects=False)
+            r = requests.get(url, timeout =15, verify=False, headers=headers,allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Inventory Result:" + str(result))
@@ -930,9 +930,9 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
                 if len(headers) >0:  # Using token
-                    r = requests.get(url,headers=headers, timeout=30, allow_redirects=False)
+                    r = requests.get(url,headers=headers, timeout=30,verify=False, allow_redirects=True)
                 else:
-                    r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), timeout=30, allow_redirects=False)
+                    r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=30, allow_redirects=True)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(f"Inverter Result:{result}")
