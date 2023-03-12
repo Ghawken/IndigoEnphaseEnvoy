@@ -25,7 +25,7 @@ import flatdict
 import re
 import logging
 import datetime
-
+import threading
 from requests.auth import HTTPDigestAuth
 
 try:
@@ -64,7 +64,7 @@ class Plugin(indigo.PluginBase):
         self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
         self.deviceNeedsUpdated = ''
         self.prefServerTimeout = int(self.pluginPrefs.get('configMenuServerTimeout', "15"))
-
+        self.https_flag = ""
         self.configUpdaterInterval = self.pluginPrefs.get('configUpdaterInterval', 24)
         self.configUpdaterForceUpdate = self.pluginPrefs.get('configUpdaterForceUpdate', False)
         self.debugupdate = self.pluginPrefs.get('debugupdate', False)
@@ -257,6 +257,69 @@ class Plugin(indigo.PluginBase):
         return
 
 
+
+    def check_endpoints(self, valuesDict, typeId, devId):
+        self.logger.info("Checking endpoints.")
+        end_thread = threading.Thread(target=self.thread_endpoints, args=[valuesDict, typeId, devId])
+        end_thread.start()
+
+
+    def thread_endpoints(self, valuesDict, typeId, devId):
+       # delete all panel devices first up
+        self.logger.info(f"Checking all possible Endpoints...")
+        self.logger.info(f"Pausing usual updates for 3 minutes")
+        self.logger.debug(f"valueDict {valuesDict}")
+        dev = indigo.devices[devId]
+        sourceip = valuesDict["sourceXML"]
+        self.WaitInterval = 180
+        endpoints = [ "http{}://{}/production.json",
+                      "http{}://{}/production",
+                      "http{}://{}/inventory.json",
+                      "http{}://{}/api/v1/production",
+                      "http{}://{}/api/v1/production/inverters",
+                      "http{}://{}/auth/check_jwt",
+                      "http{}://{}/ivp/meters",
+                      "http{}://{}/ivp/meters/readings","http{}://{}/ivp/livedata/status",
+                      "http{}://{}/ivp/meters/reports/consumption"
+                      ]
+
+        self.https_flag = "s"
+        for endpoint in endpoints:
+            url = endpoint.format(self.https_flag, sourceip)
+            try:
+                self.sleep(2)
+                self.logger.debug(f"Trying Endpoint:{url}")
+                headers = self.create_headers(dev)
+                response = requests.get(url, timeout=25, headers=headers, allow_redirects=False)
+                if response.status_code == 200:
+                    self.logger.info(f"Success:  {url}")
+                    self.logger.info(f"Response: {response.json()}")
+                else:
+                    self.logger.debug(f"Failed, Response Code  {response.status_code}")
+                    self.logger.debug(f"Response: {response}")
+            except Exception as ex:
+                self.logger.debug(f"Failed.  Exception: {ex}")
+            self.logger.debug("---------------------------------")
+        self.https_flag = ""
+        for endpoint in endpoints:
+            url = endpoint.format(self.https_flag, sourceip)
+            try:
+                self.sleep(2)
+                self.logger.debug(f"Trying Endpoint:{url}")
+                headers = self.create_headers(dev)
+                response = requests.get(url, timeout=25, headers=headers, allow_redirects=False)
+                if response.status_code == 200:
+                    self.logger.info(f"Success:  {url}")
+                    self.logger.info(f"Response: {response.json()}")
+                else:
+                    self.logger.debug(f"Failed, Response Code  {response.status_code}")
+                    self.logger.debug(f"Response: {response}")
+            except Exception as ex:
+                self.logger.debug(f"Failed.  Exception: {ex}")
+
+        self.logger.info(" ------- End of Check Endpoints -------")
+        return
+
     def runConcurrentThread(self):
 
         try:
@@ -363,8 +426,8 @@ class Plugin(indigo.PluginBase):
         """Check if json has keys for both production and consumption"""
         return "production" in json and "consumption" in json
 
-    def create_headers(self, url, dev):
-        self.logger.debug(f"Create_Headers called for {url} and device.name {dev.name} ")
+    def create_headers(self,  dev):
+        self.logger.debug(f"Create_Headers called for device.name {dev.name} ")
         headers = {}
         use_token = dev.pluginProps.get('use_token', False)
         auth_token = dev.pluginProps.get('auth_token', "")
@@ -372,39 +435,44 @@ class Plugin(indigo.PluginBase):
         if use_token and auth_token !="":
             headers = {"Accept": "application/json", "Authorization": "Bearer "+auth_token}
             self.logger.debug(f"Using Headers: {headers}")
+            self.https_flag = "s"
             return headers
         else:
+            self.http_flag =""
             return {}
 
 
     def detect_model(self, dev):
         """Method to determine if the Envoy supports consumption values or
          only production"""
-        self.endpoint_url = "http://{}/production.json".format(dev.pluginProps['sourceXML'])
+        self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
         self.logger.debug("trying Endpoint:"+str(self.endpoint_url))
-
-        headers =  self.create_headers(self.endpoint_url, dev)
+        headers =  self.create_headers(dev)
+        self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
         response = requests.get(  self.endpoint_url, timeout=15, headers={},allow_redirects=False)
         if response.status_code == 200 and self.hasProductionAndConsumption(response.json()):
             # Okay - this is Envoy S or Envoy-S Metered
             # Some have lots of blanks, need a new device type
             # CHange of plans - leave here for Legacy support, add check for EnvoyS types within this device type
             self.endpoint_type = "PC"
-            self.logger.debug("Success with EndPoint: " + str(self.endpoint_url))
+            self.logger.info("Success with EndPoint: " + str(self.endpoint_url))
+            self.logger.info(f"Response\n:{response}")
             return True
         else:
-            self.endpoint_url = "http://{}/api/v1/production".format(dev.pluginProps['sourceXML'])
+            self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
             self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
-            headers = self.create_headers(self.endpoint_url, dev)
+            headers = self.create_headers( dev)
+            self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
             response = requests.get(  self.endpoint_url, timeout=15, headers=headers,allow_redirects=False)
             if response.status_code == 200:
                 self.endpoint_type = "P"       # Envoy-C, production only
-                self.logger.debug("Success with EndPoint: "+ str(self.endpoint_url))
+                self.logger.info("Success with EndPoint: "+ str(self.endpoint_url))
+                self.logger.info(f"Response\n:{response}")
                 return True
             else:
                 self.endpoint_url = "http://{}/production".format(dev.pluginProps['sourceXML'])
                 self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
-                headers = self.create_headers(self.endpoint_url, dev)
+                headers = self.create_headers( dev)
                 response = requests.get(  self.endpoint_url, timeout=15, headers=headers, allow_redirects=False)
                 if response.status_code == 200:
                     self.endpoint_type = "P0"       # older Envoy-C
@@ -612,8 +680,9 @@ class Plugin(indigo.PluginBase):
         if serial_num == "":
             self.logger.info("Serial Number not entered in device.  Attempt to find..")
             try:
-                url = "http://{}/info.xml".format(dev.pluginProps['sourceXML'])
-                headers = self.create_headers(url, dev)
+                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
+                headers = self.create_headers( dev)
+                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
                 response = requests.get( url, timeout=30, headers=headers, allow_redirects=False)
                 if len(response.text) > 0:
                     sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
@@ -646,8 +715,9 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getTheData PRODUCTION METHOD method called.")
 
         try:
-            url = f"http://{dev.pluginProps['sourceXML']}/production.json"
-            headers = self.create_headers(url, dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
+            headers = self.create_headers( dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
             r = requests.get(url, timeout=35, headers=headers, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
@@ -678,8 +748,9 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getTheData PRODUCTION METHOD method called.")
 
         try:
-            url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production'
-            headers = self.create_headers(url, dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
+            headers = self.create_headers(dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
             r = requests.get(url,timeout=15 ,headers=headers, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
@@ -711,8 +782,9 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getAPIDataConsumption METHOD method called.")
 
         try:
-            url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/consumption'
-            headers = self.create_headers(url, dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
+            headers = self.create_headers( dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
             r = requests.get(url,timeout=15,  headers=headers, allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
@@ -815,8 +887,9 @@ class Plugin(indigo.PluginBase):
         if self.debugLevel >= 2:
             self.debugLog(u"getInventoryData Enphase Panels method called.")
         try:
-            url = 'http://' + dev.pluginProps['sourceXML'] + '/inventory.json'
-            headers = headers
+            url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
+            headers = self.create_headers(dev)
+            url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
             r = requests.get(url, timeout =15, headers=headers,allow_redirects=False)
             result = r.json()
             if self.debugLevel >= 2:
@@ -847,8 +920,8 @@ class Plugin(indigo.PluginBase):
 
         if dev.states['deviceIsOnline']:
             try:
-                url = 'http://' + dev.pluginProps['sourceXML'] + '/api/v1/production/inverters'
-                headers = self.create_headers(url, dev)
+                headers = self.create_headers( dev)
+                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}api/v1/production/inverters"
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
                 if len(headers) >0:  # Using token

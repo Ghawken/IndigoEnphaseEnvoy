@@ -4,6 +4,7 @@
     <Name>Refresh Data Now...</Name>
     <CallbackMethod>refreshDatafromMenu</CallbackMethod>
   </MenuItem>
+
   <MenuItem id="toggleDebug">
     <Name>Toggle Debugging</Name>
     <CallbackMethod>toggleDebugEnabled</CallbackMethod>

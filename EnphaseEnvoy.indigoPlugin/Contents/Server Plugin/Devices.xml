@@ -53,7 +53,6 @@
       </Field>
  <Field id="sep5" type="separator"/>
 
-
       <Field id="generatePanelDevices"
 				   type="button"
 				   tooltip="Click on this button to Generate one device for every Panel"
@@ -69,10 +68,16 @@
 				<Label>Delete Panel Indigo Devices</Label>
 				<Title>Delete Panel Devices</Title>
 				<CallbackMethod>deletePanelDevices</CallbackMethod>
-
-
-
+     </Field>
+ <Field id="sep5eda" type="separator"/>
+     <Field id="check_enpoints"
+				   type="button"
+				   tooltip="Click on this to check Device options for Debvugging">
+				<Label>[Debug] Check all device endpoints</Label>
+				<Title>Check Endpoints</Title>
+				<CallbackMethod>check_endpoints</CallbackMethod>
     </Field>
+         <Field id="seasdedp5" type="separator"/>
 <!-- Substitution -->
 
 </ConfigUI>
