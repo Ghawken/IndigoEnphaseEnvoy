@@ -922,7 +922,6 @@ class Plugin(indigo.PluginBase):
             else:
                 self.logger.debug("Error getting Serial Number.  Cannot update panels unfortunately")
                 return
-
         if dev.states['deviceIsOnline']:
             try:
                 headers = self.create_headers( dev)
