@@ -4,51 +4,69 @@
   <Device type="custom" id="EnphaseEnvoyDevice">
     <Name>Enphase Envoy-S</Name>
     <ConfigUI>
-      <Field id="label3" type="label" fontColor="black">
+      <Field id="label3" type="label" fontColor="black" alwaysUseInDialogHeightCalc="true">
         <Label>Envoy IP Address:</Label>
       </Field>      
-            <Field id="label4" type="label" fontSize="small" fontColor="black">
+            <Field id="label4" type="label" fontSize="small" fontColor="black" alwaysUseInDialogHeightCalc="true" >
         <Label></Label>
       </Field>
        <Field id="sep1" type="separator"/>
 
-      <Field id="sourceXML" type="textfield">
+      <Field id="sourceXML" type="textfield" alwaysUseInDialogHeightCalc="true">
         <Label>IP Address</Label>
       </Field>
-      <Field id="example3" type="label" fontSize="small" fontColor="black" alignText="right" >
+      <Field id="example3" type="label" fontSize="small" fontColor="black" alignText="right" alwaysUseInDialogHeightCalc="true" >
         <Label> Envoy IP - will need to enable static IP address in DHCP Server</Label>
       </Field>
          <Field id="sepa2" type="separator"/>
-              <Field id="use_token" type="checkbox" defaultValue="false" tooltip="Use Token to access">
-      <Label>Use Token:</Label>
-      <Description>Required for Firmware >7</Description>
-          </Field>
-                <Field id="serial_number" type="textfield" visibleBindingId="use_token" visibleBindingValue="true">
+        <Field id="Firmware7" type="label">
+               <Label>One of the two below is required for Firmware >=7</Label></Field>
+        <Field id="use_token" type="checkbox" defaultValue="false" tooltip="Use Token to access" alwaysUseInDialogHeightCalc="true">
+
+      <Label>Use Manual Token:</Label>
+      <Description>Required for Firmware >=7</Description>
+
+        </Field>
+                <Field id="serial_number" type="textfield" hidden="true" defaultValue="" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
         <Label>Serial Number:</Label>
       </Field>
-      <Field id="exampleaaa3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true">
+      <Field id="exampleaaa3" type="label" fontSize="small" fontColor="black" alignText="right" hidden="true" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
         <Label>Manual Enter Serial Number needed</Label>
       </Field>
 
-        <Field id="auth_token" type="textfield" visibleBindingId="use_token" visibleBindingValue="true">
-        <Label>Token:</Label>
+
+        <Field id="auth_token" type="textfield" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
+        <Label>Authenication Token:</Label>
       </Field>
-      <Field id="exampleaa3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true">
-        <Label>Use Token access needed for firmware >7
+      <Field id="exampleaa3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
+        <Label>Some form Token access needed for firmware >=7
           Create token here: https://entrez.enphaseenergy.com/</Label>
       </Field>
-
+         <Field id="sepaasdaa2" type="separator"/>
+            <Field id="generate_token" type="checkbox" defaultValue="false" tooltip="Use Token to access"  alwaysUseInDialogHeightCalc="true">
+      <Label>(or) Generate Token:</Label>
+      <Description>Required for Firmware >=7</Description>
+          </Field>
+        <Field id="enphase_user" type="textfield" defaultValue="" visibleBindingId="generate_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+        <Label>Enphase Login:</Label>
+      </Field>
+        <Field id="enphase_password" type="textfield" defaultValue="" visibleBindingId="generate_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+        <Label>Enphase Password:</Label>
+      </Field>
+      <Field id="exampleabca3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+        <Label>Some form of Token access needed for firmware >7</Label>
+      </Field>
 
          <Field id="sepaa2" type="separator"/>
 
  <Field id="sep4" type="separator"/>
 
-      <Field id="activatePanels" type="checkbox" defaultValue="false" tooltip="Would you like Panel Devices?">
+      <Field id="activatePanels" type="checkbox" defaultValue="false" tooltip="Would you like Panel Devices?" alwaysUseInDialogHeightCalc="true">
       <Label>Enable Panel Data?:</Label>
       <Description>Would you like to access per panel Data?</Description>
           </Field>
 
-        <Field id="label11" type="label" alignText="right" fontSize='small' fontColor="black">
+        <Field id="label11" type="label" alignText="right" fontSize='small' fontColor="black" alwaysUseInDialogHeightCalc="true">
         <Label>(Enable and Generate Panels Below)</Label>
       </Field>
  <Field id="sep5" type="separator"/>
@@ -56,7 +74,7 @@
       <Field id="generatePanelDevices"
 				   type="button"
 				   tooltip="Click on this button to Generate one device for every Panel"
-                visibleBindingId="activatePanels" visibleBindingValue="true">
+                visibleBindingId="activatePanels" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
 				<Label>Generate Panel Indigo Devices</Label>
 				<Title>Generate Panel Devices</Title>
 				<CallbackMethod>generatePanelDevices</CallbackMethod>
@@ -64,7 +82,7 @@
      <Field id="deletePanelDevices"
 				   type="button"
 				   tooltip="Click on this button to Generate one device for every Panel"
-                visibleBindingId="activatePanels" visibleBindingValue="false">
+                visibleBindingId="activatePanels" visibleBindingValue="false" alwaysUseInDialogHeightCalc="true">
 				<Label>Delete Panel Indigo Devices</Label>
 				<Title>Delete Panel Devices</Title>
 				<CallbackMethod>deletePanelDevices</CallbackMethod>
@@ -72,7 +90,7 @@
  <Field id="sep5eda" type="separator"/>
      <Field id="check_enpoints"
 				   type="button"
-				   tooltip="Click on this to check Device options for Debvugging">
+				   tooltip="Click on this to check Device options for Debugging" alwaysUseInDialogHeightCalc="true">
 				<Label>[Debug] Check all device endpoints</Label>
 				<Title>Check Endpoints</Title>
 				<CallbackMethod>check_endpoints</CallbackMethod>

@@ -27,6 +27,7 @@ import logging
 import datetime
 import threading
 from requests.auth import HTTPDigestAuth
+import jwt
 
 try:
     import indigo
@@ -72,7 +73,10 @@ class Plugin(indigo.PluginBase):
         self.WaitInterval = 0
         self.endpoint_type = ""
         self.endpoint_url = ""
+        self.generated_token = ""
+        self.generated_token_expiry = datetime.datetime.now()
         self.serial_number_last_six = ""
+        self.serial_number_full = ""
         self.EnvoyStype = ""
         self.logger.info(u"")
         self.logger.info(u"{0:=^130}".format(" Initializing New Plugin Session "))
@@ -256,6 +260,46 @@ class Plugin(indigo.PluginBase):
                 self.sleep(10)
         return
 
+    def get_enphasetoken(self, username, password, serialnumber, dev):
+        try:
+            self.logger.info("Logging in to Enphase to generate Enphase Token.  Should only be needed once every 12 months")
+            data = {'user[email]': username, 'user[password]': password}
+            response = requests.post('https://enlighten.enphaseenergy.com/login/login.json?',data=data, timeout=20)
+            if response.status_code >= 400:
+                raise Exception("Could not Authenticate via Enlighten auth form")
+            response_data = json.loads(response.text)
+            data = {'session_id': response_data['session_id'], 'serial_num': serialnumber, 'username':  username}
+            response = requests.post('https://entrez.enphaseenergy.com/tokens', json=data)
+            if response.status_code != 200:
+                raise Exception("Could not get 6 month token: " + response.text)
+            token_raw = response.text
+            self.logger.info(f"Generated your Enphase account Token:\n{token_raw}")
+            self.generated_token = token_raw
+            return token_raw
+        except:
+            self.logger.debug(f"Exception getting token:", exc_info=True)
+            self.logger.info("Error getting token.. check username and password.  If using generated token then cyptography then needs to be installed.")
+            self.logger.info("Install this by 'pip3 install cryptography' in a terminal window.")
+            self.logger.info("or alternatively manually download the token, which does not need cryptography installed.")
+
+    def _is_enphase_token_expired(self, token):
+        try:
+            decode = jwt.decode( token, options={"verify_signature": False}, algorithms="ES256"  )
+            exp_epoch = decode["exp"]
+            # allow a buffer so we can try and grab it sooner
+            exp_epoch -= 0
+            exp_time = datetime.datetime.fromtimestamp(exp_epoch)
+            self.generated_token_expiry = exp_time
+            if datetime.datetime.now() < exp_time:
+                self.logger.debug("Enphase Token expires at: %s", exp_time)
+                return False
+            else:
+                self.logger.debug("Enphase Token expired on: %s", exp_time)
+                return True
+        except:
+            self.logger.exception("Exception with check expired token.  Perhaps Crytography not installed?")
+            return False
+
 
 
     def check_endpoints(self, valuesDict, typeId, devId):
@@ -291,7 +335,7 @@ class Plugin(indigo.PluginBase):
                 self.sleep(2)
                 self.logger.debug(f"Trying Endpoint:{url}")
                 headers = self.create_headers(dev)
-                response = requests.get(url, timeout=25,verify=False,  headers=headers, allow_redirects=True)
+                response = requests.get(url, timeout=25,verify=False,  headers=headers, allow_redirects=False)
                 if response.status_code == 200:
                     self.logger.info(f"Success:  {url}")
                     self.logger.info(f"Response: {response.json()}")
@@ -308,7 +352,7 @@ class Plugin(indigo.PluginBase):
                 self.sleep(2)
                 self.logger.debug(f"Trying Endpoint:{url}")
                 headers = self.create_headers(dev)
-                response = requests.get(url, timeout=25, verify=False, headers=headers, allow_redirects=True)
+                response = requests.get(url, timeout=25, verify=False, headers=headers, allow_redirects=False)
                 if response.status_code == 200:
                     self.logger.info(f"Success:  {url}")
                     self.logger.info(f"Response: {response.json()}")
@@ -433,18 +477,56 @@ class Plugin(indigo.PluginBase):
     def create_headers(self,  dev):
         self.logger.debug(f"Create_Headers called for device.name {dev.name} ")
         headers = {}
-        use_token = dev.pluginProps.get('use_token', False)
+        generate_token = dev.pluginProps.get('generate_token', False)
         auth_token = dev.pluginProps.get('auth_token', "")
-        self.logger.debug(f"Use_token: {use_token}")
+        use_token = dev.pluginProps.get('use_token', False)
+        username = dev.pluginProps.get("enphase_user","")
+        password = dev.pluginProps.get("enphase_password","")
+        self.logger.debug(f"Use Manual token: {use_token} & Generate Token {generate_token}")
+
+        if use_token==False and generate_token==False:
+            self.logger.debug("Not using Tokens.")
+            self.https_flag=""
+            return headers
+
         if use_token and auth_token !="":
             headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
             if self.debug:
                 self.logger.debug(f"Using Headers: {headers}")
             self.https_flag = "s"
             return headers
-        else:
-            self.https_flag =""
-            return {}
+
+        if use_token and auth_token =="":
+            self.logger.error("To use your own manual token you must enter it first.  Please do so asap.")
+            return headers
+
+        if self.serial_number_full == "":
+            self.get_serial_number(dev)
+
+        if generate_token:
+            if username == "":
+                self.logger.error("To Generate a token you must enter username in device edit settings for enphase")
+                return headers
+            if password == "":
+                self.logger.error("To Generate a token you must enter password in device edit settings for enphase")
+                return headers
+            if self.generated_token =="":
+                self.get_enphasetoken(username, password, self.serial_number_full, dev)
+                if not self._is_enphase_token_expired(self.generated_token):
+                    self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
+                else:
+                    self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
+            elif self._is_enphase_token_expired(self.generated_token):
+                self.get_enphasetoken(username, password, self.serial_number_full, dev)
+                if not self._is_enphase_token_expired(self.generated_token):
+                    self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
+                else:
+                    self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
+            headers = {"Accept": "application/json", "Authorization": "Bearer " + str(self.generated_token)}
+            if self.debug:
+                self.logger.debug(f"Using Headers: {headers}")
+            self.https_flag = "s"  ##  this should be self.https_flag = "s".  Set to "" here for testing only
+            return headers
 
 
     def detect_model(self, dev):
@@ -680,26 +762,31 @@ class Plugin(indigo.PluginBase):
     def get_serial_number(self,dev):
         """Method to get last six digits of Envoy serial number for auth"""
         self.logger.debug("Get_Serial_Number_called. ")
-
         serial_num = dev.pluginProps.get("serial_number", "")
         if serial_num == "":
-            self.logger.info("Serial Number not entered in device.  Attempt to find..")
+            self.logger.debug("Attempting to locate serial number")
             try:
-                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
-                headers = self.create_headers( dev)
-                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
-                response = requests.get( url, timeout=30, headers=headers,verify=False,  allow_redirects=True)
+                #headers = self.create_headers( dev)
+                #url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
+                # seems to work as http withoput headers for all firmwares?
+                url = f"http://{dev.pluginProps['sourceXML']}/info.xml"
+                response = requests.get( url, timeout=30, allow_redirects=False)
                 if len(response.text) > 0:
                     sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
                     self.serial_number_last_six = sn
-                    self.logger.debug("Found Serial Number:"+str(self.serial_number_last_six))
+                    self.serial_number_full = response.text.split("<sn>")[1].split("</sn>")[0]
+                    self.logger.debug("Found 6 digit Serial Number:"+str(self.serial_number_last_six))
+                    self.logger.info("Found Full Enphase Envoy Serial Number:" + str(self.serial_number_full))
                     return True
             except requests.exceptions.ConnectionError:
                 self.logger.info("Error connecting to info.xml to find Serial Number")
                 return False
         else:
-            self.logger.info("Using Serial Number entered manually in device settings.")
+            self.logger.debug("Using Serial Number entered manually in device settings.")
             self.serial_number_last_six = serial_num[-6:]
+            self.serial_number_full = serial_num
+            self.logger.debug("Found 6 digit Serial Number:" + str(self.serial_number_last_six))
+            self.logger.info("Found Full Enphase Envoy Serial Number:" + str(self.serial_number_full))
             return serial_num[-6:]
 
     def gettheDataChoice(self,dev):
@@ -753,7 +840,7 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getTheData PRODUCTION METHOD method called.")
 
         try:
-            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
+
             headers = self.create_headers(dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
             r = requests.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
@@ -787,7 +874,7 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getAPIDataConsumption METHOD method called.")
 
         try:
-            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
+
             headers = self.create_headers( dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
             r = requests.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
@@ -802,11 +889,14 @@ class Plugin(indigo.PluginBase):
             result = None
             return result
 
-    def checkThePanels_New(self,dev):
+    def checkThePanels_New(self,dev, thePanels=None):
         if self.debugLevel >= 2:
             self.debugLog(u'check thepanels called')
         if dev.pluginProps['activatePanels']:
-            self.thePanels = self.getthePanels(dev)
+            if thePanels == None:
+                self.thePanels = self.getthePanels(dev)
+            else:
+                self.thePanels = thePanels
             try:
                 if self.thePanels is not None:
                     x = 1
@@ -819,8 +909,8 @@ class Plugin(indigo.PluginBase):
                                 #self.logger.error(u'Matched Panel Found:'+str(panel['serialNumber']))
                                 #deviceName = 'Enphase SolarPanel ' + str(x)
                                 #self.logger.error(u"Enphase Panel SN:"+str(str(panel['serialNumber'])))
-                                if dev.states['producing']:
-                                    dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(panel['lastReportWatts']))
+                                #if dev.states['producing']:
+                                dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(panel['lastReportWatts']))
                                 dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp( int(panel['lastReportDate'])).strftime('%c')))
                                 #dev.updateStateOnServer('serialNo', value=float(panel['serialNumber']))
                                 dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
@@ -846,6 +936,7 @@ class Plugin(indigo.PluginBase):
 
         if dev.pluginProps['activatePanels'] and dev.states['deviceIsOnline']:
             self.inventoryDict = self.getInventoryData(dev)
+
             try:
                 if self.inventoryDict is not None:
                     for dev in indigo.devices.iter('self.EnphasePanelDevice'):
@@ -892,12 +983,11 @@ class Plugin(indigo.PluginBase):
         if self.debugLevel >= 2:
             self.debugLog(u"getInventoryData Enphase Panels method called.")
         try:
-            url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
             headers = self.create_headers(dev)
             url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
-            r = requests.get(url, timeout =15, verify=False, headers=headers,allow_redirects=True)
+            r = requests.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
             result = r.json()
-            if self.debugLevel >= 2:
+            if self.debug:
                 self.debugLog(u"Inventory Result:" + str(result))
             return result
 
@@ -928,10 +1018,10 @@ class Plugin(indigo.PluginBase):
                 url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production/inverters"
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
-                if len(headers) >0:  # Using token
-                    r = requests.get(url,headers=headers, timeout=30,verify=False, allow_redirects=True)
+                if self.https_flag=="s":  # Using check using https in which case token.
+                    r = requests.get(url,headers=headers, timeout=35,verify=False, allow_redirects=True)
                 else:
-                    r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=30, allow_redirects=True)
+                    r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(f"Inverter Result:{result}")
@@ -1075,7 +1165,6 @@ class Plugin(indigo.PluginBase):
                 if len(data['production']) > 1:
                     dev.updateStateOnServer('productionWattsNow', value=int(data['production'][1]['wNow']))
                     productionWatts = int(data['production'][1]['wNow'])
-
                     dev.updateStateOnServer('production7days', value=int(data['production'][1]['whLastSevenDays']))
                     dev.updateStateOnServer('productionWattsToday', value=int(data['production'][1]['whToday']))
                     dev.updateStateOnServer('productionwhLifetime', value=int(data['production'][1]['whLifetime']))
@@ -1361,7 +1450,7 @@ class Plugin(indigo.PluginBase):
                     x=x+1
             #now fill with data
             self.sleep(2)
-            self.checkThePanels_New(dev)
+            self.checkThePanels_New(dev, self.thePanels)
 
 
         except Exception as error:
