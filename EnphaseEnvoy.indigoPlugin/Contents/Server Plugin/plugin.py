@@ -60,6 +60,8 @@ class Plugin(indigo.PluginBase):
         indigo.PluginBase.__init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.debugLog(u"Initializing Enphase plugin.")
 
+
+
         self.timeOutCount = 0
         self.debug = self.pluginPrefs.get('showDebugInfo', False)
         self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
@@ -97,6 +99,14 @@ class Plugin(indigo.PluginBase):
                 self.pluginPrefs['showDebugLevel'] = 2
             else:
                 self.pluginPrefs['showDebugLevel'] = 1
+
+        try:
+            import cryptography
+            self.no_cryptography = False
+        except:
+            self.logger.info("Python Module cryptograph not installed.  Ideally this should be installed to allow token expiry checking")
+            self.logger.info("To install from terminal type 'pip3 install cryptography'.  The plugin will need to be restarted.")
+            self.no_cryptography = True
 
     def __del__(self):
         if self.debugLevel >= 2:
@@ -286,6 +296,7 @@ class Plugin(indigo.PluginBase):
         try:
             decode = jwt.decode( token, options={"verify_signature": False}, algorithms="ES256"  )
             exp_epoch = decode["exp"]
+            self.logger.debug(f"Decoded Token:\n{decode}")
             # allow a buffer so we can try and grab it sooner
             exp_epoch -= 0
             exp_time = datetime.datetime.fromtimestamp(exp_epoch)
@@ -512,16 +523,21 @@ class Plugin(indigo.PluginBase):
                 return headers
             if self.generated_token =="":
                 self.get_enphasetoken(username, password, self.serial_number_full, dev)
-                if not self._is_enphase_token_expired(self.generated_token):
-                    self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
-                else:
-                    self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
+                if self.no_cryptography == False:
+                    if not self._is_enphase_token_expired(self.generated_token):
+                        self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
+                    else:
+                        self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
+            elif self.no_cryptography:
+                self.logger.debug("Skipping any token expiry checking as no cryptography.")
             elif self._is_enphase_token_expired(self.generated_token):
                 self.get_enphasetoken(username, password, self.serial_number_full, dev)
-                if not self._is_enphase_token_expired(self.generated_token):
-                    self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
-                else:
-                    self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
+                if self.no_cryptography == False:
+                    if not self._is_enphase_token_expired(self.generated_token):
+                        self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
+                    else:
+                        self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
+
             headers = {"Accept": "application/json", "Authorization": "Bearer " + str(self.generated_token)}
             if self.debug:
                 self.logger.debug(f"Using Headers: {headers}")
