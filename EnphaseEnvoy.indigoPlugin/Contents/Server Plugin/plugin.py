@@ -60,7 +60,7 @@ class Plugin(indigo.PluginBase):
         indigo.PluginBase.__init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.debugLog(u"Initializing Enphase plugin.")
 
-
+        self.session = requests.Session()
 
         self.timeOutCount = 0
         self.debug = self.pluginPrefs.get('showDebugInfo', False)
@@ -160,6 +160,7 @@ class Plugin(indigo.PluginBase):
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
         dev.stateListOrDisplayStateIdChanged()
+
 
 
 # Default Indigo Plugin StateList
@@ -285,6 +286,7 @@ class Plugin(indigo.PluginBase):
             token_raw = response.text
             self.logger.info(f"Generated your Enphase account Token:\n{token_raw}")
             self.generated_token = token_raw
+
             return token_raw
         except:
             self.logger.debug(f"Exception getting token:", exc_info=True)
@@ -539,11 +541,24 @@ class Plugin(indigo.PluginBase):
                         self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
 
             headers = {"Accept": "application/json", "Authorization": "Bearer " + str(self.generated_token)}
+
+
             if self.debug:
                 self.logger.debug(f"Using Headers: {headers}")
+            self.login(headers, dev)
             self.https_flag = "s"  ##  this should be self.https_flag = "s".  Set to "" here for testing only
             return headers
 
+    def login(self, headers, dev):
+        try:
+            # If successful this will return a "sessionid" cookie that validates our access to the gateway.
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/auth/check_jwt"  # Added lines TSH 7/19/23
+            response = self.session.get(url, headers=headers, verify=False, allow_redirects=True)  # Added lines TSH 7/19/23
+            # Check the response is positive.
+            return response.status_code
+        except:
+            self.logger.info("Error with getting SessionID via check_jwt.")
+            return ""
 
     def detect_model(self, dev):
         """Method to determine if the Envoy supports consumption values or
@@ -552,7 +567,8 @@ class Plugin(indigo.PluginBase):
         self.logger.debug("trying Endpoint:"+str(self.endpoint_url))
         headers =  self.create_headers(dev)
         self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
-        response = requests.get(  self.endpoint_url, timeout=15, verify=False, headers=headers,allow_redirects=True)
+
+        response = self.session.get(  self.endpoint_url, timeout=25, verify=False, headers=headers,allow_redirects=True)
         if response.status_code == 200 and self.hasProductionAndConsumption(response.json()):
             # Okay - this is Envoy S or Envoy-S Metered
             # Some have lots of blanks, need a new device type
@@ -566,7 +582,7 @@ class Plugin(indigo.PluginBase):
             self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
             headers = self.create_headers( dev)
             self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
-            response = requests.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers,allow_redirects=True)
+            response = self.session.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers,allow_redirects=True)
             if response.status_code == 200:
                 self.endpoint_type = "P"       # Envoy-C, production only
                 self.logger.info("Success with EndPoint: "+ str(self.endpoint_url))
@@ -576,7 +592,7 @@ class Plugin(indigo.PluginBase):
                 self.endpoint_url = "http://{}/production".format(dev.pluginProps['sourceXML'])
                 self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
                 headers = self.create_headers( dev)
-                response = requests.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers, allow_redirects=True)
+                response = self.session.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers, allow_redirects=True)
                 if response.status_code == 200:
                     self.endpoint_type = "P0"       # older Envoy-C
                     self.logger.debug("Success with EndPoint: " + str(self.endpoint_url))
@@ -786,7 +802,7 @@ class Plugin(indigo.PluginBase):
                 #url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
                 # seems to work as http withoput headers for all firmwares?
                 url = f"http://{dev.pluginProps['sourceXML']}/info.xml"
-                response = requests.get( url, timeout=30, allow_redirects=False)
+                response = requests.get( url, timeout=30, allow_redirects=True, verify=False)
                 if len(response.text) > 0:
                     sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
                     self.serial_number_last_six = sn
@@ -825,8 +841,8 @@ class Plugin(indigo.PluginBase):
         try:
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
             headers = self.create_headers( dev)
-            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
-            r = requests.get(url, timeout=35, headers=headers, verify=False, allow_redirects=True)
+            self.logger.debug(f"\n Using URL {url}\n Cookies: {self.session.cookies.get_dict()}\n Headers {headers}")
+            r = self.session.get(url, timeout=35, headers=headers, verify=False, allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(f"Result:{result}")
@@ -859,7 +875,7 @@ class Plugin(indigo.PluginBase):
 
             headers = self.create_headers(dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
-            r = requests.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
+            r = self.session.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -893,7 +909,7 @@ class Plugin(indigo.PluginBase):
 
             headers = self.create_headers( dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
-            r = requests.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
+            r = self.session.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -1001,7 +1017,7 @@ class Plugin(indigo.PluginBase):
         try:
             headers = self.create_headers(dev)
             url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
-            r = requests.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
+            r = self.session.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
             result = r.json()
             if self.debug:
                 self.debugLog(u"Inventory Result:" + str(result))
@@ -1035,9 +1051,9 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
                 if self.https_flag=="s":  # Using check using https in which case token.
-                    r = requests.get(url,headers=headers, timeout=35,verify=False, allow_redirects=True)
+                    r = self.session.get(url,headers=headers, timeout=35,verify=False, allow_redirects=True)
                 else:
-                    r = requests.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
+                    r = self.session.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(f"Inverter Result:{result}")
