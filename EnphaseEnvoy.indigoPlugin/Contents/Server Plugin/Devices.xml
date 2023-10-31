@@ -25,7 +25,6 @@
 
       <Label>Use Manual Token:</Label>
       <Description>Required for Firmware >=7</Description>
-
         </Field>
                 <Field id="serial_number" type="textfield" hidden="true" defaultValue="" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
         <Label>Serial Number:</Label>
@@ -33,7 +32,6 @@
       <Field id="exampleaaa3" type="label" fontSize="small" fontColor="black" alignText="right" hidden="true" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
         <Label>Manual Enter Serial Number needed</Label>
       </Field>
-
 
         <Field id="auth_token" type="textfield" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
         <Label>Authenication Token:</Label>
@@ -96,6 +94,14 @@
 				<CallbackMethod>check_endpoints</CallbackMethod>
     </Field>
          <Field id="seasdedp5" type="separator"/>
+            <Field id="unmetered" type="checkbox" defaultValue="False" tooltip="Enabling will result in verbose logging of IP150 connection.">
+                <Label></Label>
+        <Description>Unmetered Envoy >7 Firmware</Description>
+    </Field>
+                <Field id="label1211" type="label" alignText="right" fontSize='small' fontColor="black" alwaysUseInDialogHeightCalc="true">
+        <Label>Checking this box uses production.json as endpoint but only using production Watts for seemingly rare cases that Envoy-S is unmetered
+        Default (unchecked)</Label>
+      </Field>
 <!-- Substitution -->
 
 </ConfigUI>

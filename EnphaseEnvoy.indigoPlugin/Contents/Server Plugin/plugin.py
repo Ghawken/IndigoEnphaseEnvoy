@@ -76,6 +76,9 @@ class Plugin(indigo.PluginBase):
         self.endpoint_type = ""
         self.endpoint_url = ""
         self.generated_token = ""
+
+        self.using_token = False
+
         self.generated_token_expiry = datetime.datetime.now()
         self.serial_number_last_six = ""
         self.serial_number_full = ""
@@ -499,9 +502,11 @@ class Plugin(indigo.PluginBase):
 
         if use_token==False and generate_token==False:
             self.logger.debug("Not using Tokens.")
+            self.using_token = False
             self.https_flag=""
             return headers
 
+        self.using_token = True
         if use_token and auth_token !="":
             headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
             if self.debug:
@@ -823,7 +828,8 @@ class Plugin(indigo.PluginBase):
 
     def gettheDataChoice(self,dev):
         envoyType= dev.states["typeEnvoy"]
-        if envoyType == "Metered":
+        unmetered =  dev.pluginProps.get('unmetered', False)
+        if envoyType == "Metered" or unmetered:
             return self.getTheData(dev)
         elif envoyType =="Unmetered":
             return self.legacyGetTheData(dev)
@@ -869,7 +875,7 @@ class Plugin(indigo.PluginBase):
         The getTheData() method is used to retrieve  API Client Data
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"getTheData PRODUCTION METHOD method called.")
+            self.debugLog(u"legacygetTheData PRODUCTION METHOD method called.")
 
         try:
 
@@ -1177,6 +1183,9 @@ class Plugin(indigo.PluginBase):
 
         try:
             envoyType = dev.states['typeEnvoy']
+            unmetered = dev.pluginProps.get('unmetered', False)
+            if unmetered:
+                envoyType = "Unmetered"
             consumptionWatts =0
             productionWatts =0
             # Check that finalDict contains a production list
@@ -1207,7 +1216,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('production7days',value=0)
                     dev.updateStateOnServer('productionWattsToday',value=0)
 
-            elif envoyType == "Unmetered":
+            if envoyType == "Unmetered":
                 if "wattsNow" in data:
                     dev.updateStateOnServer('productionWattsNow', value=int(data['wattsNow']))
                     productionWatts = int(data['wattsNow'])
@@ -1218,6 +1227,9 @@ class Plugin(indigo.PluginBase):
                             dev.updateStateOnServer('productionWattsToday', value=int(data['wattHoursToday']))
                         if 'wattHoursLifetime' in data:
                             dev.updateStateOnServer('productionwhLifetime', value=int(data['wattHoursLifetime']))
+                elif "production" in data:
+                    dev.updateStateOnServer("productionWattsNow", value=int(data["production"][0]["wNow"]))
+                    productionWatts = int(data["production"][0]["wNow"])
 
             if envoyType == "Metered":
                 if "consumption" in data:
