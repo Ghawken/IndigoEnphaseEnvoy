@@ -12,6 +12,7 @@ Enphase Plugin
 import json
 import sys
 import time as t
+import hashlib
 import requests
 try:
     # For Python 3.0 and later
@@ -323,6 +324,45 @@ class Plugin(indigo.PluginBase):
         end_thread = threading.Thread(target=self.thread_endpoints, args=[valuesDict, typeId, devId])
         end_thread.start()
 
+########### Get Installer Password
+    def installer_password(self, valuesDict, typeId, devId):
+        self.logger.info("Checking endpoints.")
+
+        gSerialNumber = self.serial_number_full.encode("utf-8")
+        if len(gSerialNumber) <2:
+            self.logger.info(f"Serial Number : {gSerialNumber} appears incorrect")
+            return
+
+        realm = b'enphaseenergy.com'
+        userName = b'installer'
+
+        digest =  hashlib.md5(b'[e]' + userName + b'@' + realm + b'#' + gSerialNumber + b' EnPhAsE eNeRgY ').hexdigest()
+        countZero = digest.count('0')
+        countOne = digest.count('1')
+        password = ''
+        for cc in digest[::-1][:8]:
+            if countZero == 3 or countZero == 6 or countZero == 9:
+                countZero = countZero - 1
+            if countZero > 20:
+                countZero = 20
+            if countZero < 0:
+                countZero = 0
+
+            if countOne == 9 or countOne == 15:
+                countOne = countOne - 1
+            if countOne > 26:
+                countOne = 26
+            if countOne < 0:
+                countOne = 0
+            if cc == '0':
+                password += chr(ord('f') + countZero)
+                countZero = countZero - 1
+            elif cc == '1':
+                password += chr(ord('@') + countOne)
+                countOne = countOne - 1
+            else:
+                password += cc
+        self.logger.info(f"Installer Password:\n {password}")
 
     def thread_endpoints(self, valuesDict, typeId, devId):
        # delete all panel devices first up
@@ -332,14 +372,17 @@ class Plugin(indigo.PluginBase):
         dev = indigo.devices[devId]
         sourceip = valuesDict["sourceXML"]
         self.WaitInterval = 360
-        endpoints = [ "http{}://{}/production.json",
+        endpoints = [ "http{}://{}/ivp/pdm/energy",
+                      "http{}://{}/ivp/pdm/production",
+            "http{}://{}/production.json",
                       "http{}://{}/production",
                       "http{}://{}/inventory.json",
                       "http{}://{}/api/v1/production",
                       "http{}://{}/api/v1/production/inverters",
                       "http{}://{}/auth/check_jwt",
                       "http{}://{}/ivp/meters",
-                      "http{}://{}/ivp/meters/readings","http{}://{}/ivp/livedata/status",
+                      "http{}://{}/ivp/meters/readings",
+                      "http{}://{}/ivp/livedata/status",
                       "http{}://{}/ivp/meters/reports/consumption",
                       "http{}://{}/info.xml"
                       ]
@@ -563,6 +606,8 @@ class Plugin(indigo.PluginBase):
             return response.status_code
         except:
             self.logger.info("Error with getting SessionID via check_jwt.")
+            if self.debug:
+                self.logger.debug("Error with getting SessionID via check_jwt",exc_info=True)
             return ""
 
     def detect_model(self, dev):

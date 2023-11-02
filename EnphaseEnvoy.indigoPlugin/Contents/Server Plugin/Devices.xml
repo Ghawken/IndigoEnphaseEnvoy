@@ -93,6 +93,13 @@
 				<Title>Check Endpoints</Title>
 				<CallbackMethod>check_endpoints</CallbackMethod>
     </Field>
+             <Field id="attempt_installer"
+				   type="button"
+				   tooltip="Click on this to attempt to generate installer passdword" alwaysUseInDialogHeightCalc="true">
+				<Label>[Debug] Print Installer password to Log</Label>
+				<Title>Run</Title>
+				<CallbackMethod>installer_password</CallbackMethod>
+    </Field>
          <Field id="seasdedp5" type="separator"/>
             <Field id="unmetered" type="checkbox" defaultValue="False" tooltip="Enabling will result in verbose logging of IP150 connection.">
                 <Label></Label>
