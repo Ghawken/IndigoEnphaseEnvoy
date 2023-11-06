@@ -392,14 +392,14 @@ class Plugin(indigo.PluginBase):
             url = endpoint.format(https_flag, sourceip)
             try:
                 self.sleep(2)
-                self.logger.debug(f"Trying Endpoint:{url}")
+                self.logger.info(f"Trying Endpoint:{url}")
                 headers = self.create_headers(dev)
                 response = requests.get(url, timeout=25,verify=False,  headers=headers, allow_redirects=False)
                 if response.status_code == 200:
                     self.logger.info(f"Success:  {url}")
                     self.logger.info(f"Response: {response.json()}")
                 else:
-                    self.logger.debug(f"Failed, Response Code  {response.status_code}")
+                    self.logger.info(f"Failed, Response Code  {response.status_code}")
                     self.logger.debug(f"Response: {response}")
             except Exception as ex:
                 self.logger.debug(f"Failed.  Exception: {ex}")
@@ -409,14 +409,14 @@ class Plugin(indigo.PluginBase):
             url = endpoint.format(https_flag, sourceip)
             try:
                 self.sleep(2)
-                self.logger.debug(f"Trying Endpoint:{url}")
+                self.logger.info(f"Trying Endpoint:{url}")
                 headers = self.create_headers(dev)
                 response = requests.get(url, timeout=25, verify=False, headers=headers, allow_redirects=False)
                 if response.status_code == 200:
                     self.logger.info(f"Success:  {url}")
                     self.logger.info(f"Response: {response.json()}")
                 else:
-                    self.logger.debug(f"Failed, Response Code  {response.status_code}")
+                    self.logger.info(f"Failed, Response Code  {response.status_code}")
                     self.logger.debug(f"Response: {response}")
             except Exception as ex:
                 self.logger.debug(f"Failed.  Exception: {ex}")
