@@ -20,6 +20,10 @@ try:
 except ImportError:
     # Fall back to Python 2's urllib2
     from urllib2 import urlopen
+
+from urllib.parse import urlsplit
+import time
+from collections import defaultdict
 import os
 import shutil
 import flatdict
@@ -56,12 +60,17 @@ WEEK_PRODUCTION_REGEX = \
 LIFE_PRODUCTION_REGEX = \
     r'<td>Since Installation</td>\s+<td>\s*(\d+|\d+\.\d+)\s*(Wh|kWh|MWh)</td>'
 
+
+
+
 class Plugin(indigo.PluginBase):
     def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
         indigo.PluginBase.__init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.debugLog(u"Initializing Enphase plugin.")
 
-        self.session = requests.Session()
+        self.session_cache = defaultdict(self._new_session)
+
+        #self.session = requests.Session()
 
         self.timeOutCount = 0
         self.debug = self.pluginPrefs.get('showDebugInfo', False)
@@ -111,6 +120,70 @@ class Plugin(indigo.PluginBase):
             self.logger.info("Python Module cryptograph not installed.  Ideally this should be installed to allow token expiry checking")
             self.logger.info("To install from terminal type 'pip3 install cryptography'.  The plugin will need to be restarted.")
             self.no_cryptography = True
+
+    def _new_session(self):
+        """Create a fresh requests.Session with keep-alive and TLS disabled."""
+        s = requests.Session()
+        s.verify = False  # keep skipping TLS validation
+        s.headers.update({"Connection": "keep-alive"})
+        return s
+
+    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────
+    # Generic GET  – headers mandatory, auth optional, detailed logging
+    # ─────────────────────────────────────────────────────────────
+    def _get(self, url, *, headers, timeout=15, auth=None, **kwargs):
+        """
+        Fetch *url* with a per-host Session, emitting DEBUG logs that show
+        whether we are creating or re-using the session for this host.
+        """
+        host = urlsplit(url).netloc  # e.g. "192.168.1.50"
+        is_new = host not in self.session_cache  # defaultdict check *before* lookup
+        session = self.session_cache[host]  # auto-creates if missing
+
+        # ── session creation / reuse info ───────────────────────
+        if is_new:
+            self.logger.debug(
+                f"[HTTP] Created NEW session {hex(id(session))} for host {host}"
+            )
+        else:
+            self.logger.debug(
+                f"[HTTP] Re-using session {hex(id(session))} for host {host}"
+            )
+
+        # ── outgoing request details ────────────────────────────
+        self.logger.debug(
+            f"[HTTP] GET {url}\n"
+            f"       timeout={timeout!r}  auth={'YES' if auth else 'NO'}\n"
+            f"       headers={headers}\n"
+            f"       cookies={session.cookies.get_dict()}"
+        )
+
+        try:
+            resp = session.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
+                allow_redirects=True,
+                **kwargs
+            )
+
+            self.logger.debug(
+                f"[HTTP] {host} → {resp.status_code}  "
+                f"(session {hex(id(session))})"
+            )
+            return resp
+
+        except requests.exceptions.RequestException as err:
+            # ── connection/TLS error; drop pool and log ─────────
+            self.logger.debug(
+                f"[HTTP] ERROR for host {host}: {err} — "
+                f"closing session {hex(id(session))} and recreating"
+            )
+            session.close()
+            self.session_cache[host] = self._new_session()
+            raise
 
     def __del__(self):
         if self.debugLevel >= 2:
@@ -429,72 +502,103 @@ class Plugin(indigo.PluginBase):
 
     def runConcurrentThread(self):
 
+        # ─────────────────────────────────────────────────────────
+        # Constants
+        # ─────────────────────────────────────────────────────────
+        NOW = time.monotonic  # immune to NTP/DST jumps
+
+        CHECKS = {  # cadence in seconds
+            "datetime": 22 * 60,  # 22 min
+            "envoy_type": 6 * 60 * 60,  # 6 h
+            "panel_inventory": 5 * 60,  # 5 min
+            "panel_health": 200,  # 3 min 20 s
+            "envoy_refresh": 60,  # 1 min
+        }
+
+        # timers[dev.id][check_name] → last-run timestamp
+        timers = defaultdict(lambda: defaultdict(lambda: NOW()))
+
+        # ─────────────────────────────────────────────────────────
+        # Helper: run-and-reset
+        # ─────────────────────────────────────────────────────────
+        def _run_check(ts, key, period, func, *args):
+            """
+            Run `func` when its period has elapsed.
+
+            • Timer is bumped *before* the call so a failure
+              does NOT cause an immediate retry.
+            • Any exception is logged; probe will try again
+              after the normal interval.
+            """
+            now = NOW()
+            if now - ts[key] >= period:
+                ts[key] = now  # ← advance timer first
+                try:
+                    func(*args)
+                except Exception:
+                    self.logger.exception(
+                        f"{func.__name__} failed for {args[0].name} – will retry in {period}s"
+                    )
+
         try:
-            panellastcheck = t.time()
-            envoyslastcheck = t.time()
-            envoylegacylastcheck = t.time()
-            panelinventorylastcheck = t.time()
-            Anychecklastcheck = t.time()
-            checkEnvoyType = t.time()
-            checkdateTime = t.time()
-## check main device on startup.
+            # ── One-off startup refresh ─────────────────────────
             for dev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
-                if self.debugLevel>=2:
-                    self.debugLog(u'Quick Checks Before Loop')
                 if dev.enabled:
                     self.refreshDataForDev(dev)
                     self.sleep(15)
+
             for dev in indigo.devices.iter('self.EnphaseEnvoyLegacy'):
-                if dev.enabled :
+                if dev.enabled:
                     self.legacyRefreshEnvoy(dev)
                     self.sleep(15)
 
-# Loop for continuing checks
+            # ── Main loop ───────────────────────────────────────
             while True:
+
+                # Modern Envoy devices
                 for dev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
-                    if dev.enabled and t.time() > (checkdateTime+ 1320):  ##22 minutes --
-                        ## Checking current time/date
-                        self.checkDayTime(dev)
-                        checkdateTime = t.time()
+                    if not dev.enabled:
+                        continue
+                    ts = timers[dev.id]
 
-                    if dev.enabled and t.time() > (checkEnvoyType + 21600 ): ## 6 hours
-                        self.checkEnvoyType(dev)
-                        checkEnvoyType = t.time()
-                    elif dev.enabled and t.time() > (panelinventorylastcheck + 300):   # minutes
-                        self.checkPanelInventory(dev)
-                        self.sleep(5)
-                        panelinventorylastcheck = t.time()
-                    elif dev.enabled and t.time() > (panellastcheck + 200):  # minutes
-                        self.checkThePanels_New(dev)
-                        panellastcheck = t.time()
-                        self.sleep(5)
-                    elif dev.enabled and t.time() > (envoyslastcheck + 60):  # 2minutes
-                        self.refreshDataForDev(dev)
-                        envoyslastcheck = t.time()
-                        self.sleep(5)
+                    _run_check(ts, "datetime", CHECKS["datetime"], self.checkDayTime, dev)
+                    _run_check(ts, "envoy_type", CHECKS["envoy_type"], self.checkEnvoyType, dev)
+                    _run_check(ts, "panel_inventory", CHECKS["panel_inventory"], self.checkPanelInventory, dev)
+                    _run_check(ts, "panel_health", CHECKS["panel_health"], self.checkThePanels_New, dev)
+                    _run_check(ts, "envoy_refresh", CHECKS["envoy_refresh"], self.refreshDataForDev, dev)
+
+                    self.sleep(1)  # small yield between devices
+
+                # Legacy Envoy devices
                 for dev in indigo.devices.iter('self.EnphaseEnvoyLegacy'):
-                    if dev.enabled and t.time()>(envoylegacylastcheck+60):
-                        self.legacyRefreshEnvoy(dev)
-                        self.sleep(5)
-                        envoylegacylastcheck = t.time()
+                    if not dev.enabled:
+                        continue
+                    ts = timers[dev.id]
+                    _run_check(ts, "envoy_refresh", CHECKS["envoy_refresh"], self.legacyRefreshEnvoy, dev)
+                    self.sleep(1)
 
-                self.sleep(25)
-                if self.WaitInterval>0:
+                # ── Global back-off if another routine requested it ──
+                if self.WaitInterval > 0:
+                    self.logger.debug(f"Back-off requested: sleeping {self.WaitInterval} s")
+                    self.sleep(self.WaitInterval)
                     self.WaitInterval = 0
-                    self.sleep(120)
-                    envoyslastcheck = t.time()
-                    envoylegacylastcheck = t.time()
-                    panelinventorylastcheck = t.time()
-                    panellastcheck = t.time()
+
+                    # After a forced wait, bump only short-cadence checks
+                    now = NOW()
+                    for ts in timers.values():
+                        ts["panel_inventory"] = now
+                        ts["panel_health"] = now
+                        ts["envoy_refresh"] = now
+                    # Leave "envoy_type" and "datetime" untouched → cadence preserved
+
+                self.sleep(25)  # base loop delay
 
         except self.StopThread:
-            self.debugLog(u'Restarting/or error. Stopping Enphase/Envoy thread.')
-            pass
-
+            self.debugLog("Stopping Enphase/Envoy thread.")
         except Exception:
-            self.logger.exception(u"Exception in Main Loop")
+            self.logger.exception("Unhandled exception in Enphase/Envoy thread")
             self.WaitInterval = 60
-            pass
+
 
     def checkDayTime(self, device):
         try:
@@ -601,7 +705,8 @@ class Plugin(indigo.PluginBase):
         try:
             # If successful this will return a "sessionid" cookie that validates our access to the gateway.
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/auth/check_jwt"  # Added lines TSH 7/19/23
-            response = self.session.get(url, headers=headers, verify=False, allow_redirects=True)  # Added lines TSH 7/19/23
+            response = self._get(url, headers=headers)
+            #response = self.session.get(url, headers=headers, verify=False, allow_redirects=True)  # Added lines TSH 7/19/23
             # Check the response is positive.
             return response.status_code
         except:
@@ -618,7 +723,8 @@ class Plugin(indigo.PluginBase):
         headers =  self.create_headers(dev)
         self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
 
-        response = self.session.get(  self.endpoint_url, timeout=25, verify=False, headers=headers,allow_redirects=True)
+        #response = self.session.get(  self.endpoint_url, timeout=25, verify=False, headers=headers,allow_redirects=True)
+        response = self._get(self.endpoint_url, timeout=25, headers=headers)
         if response.status_code == 200 and self.hasProductionAndConsumption(response.json()):
             # Okay - this is Envoy S or Envoy-S Metered
             # Some have lots of blanks, need a new device type
@@ -632,7 +738,7 @@ class Plugin(indigo.PluginBase):
             self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
             headers = self.create_headers( dev)
             self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
-            response = self.session.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers,allow_redirects=True)
+            response = self._get( self.endpoint_url, headers=headers)
             if response.status_code == 200:
                 self.endpoint_type = "P"       # Envoy-C, production only
                 self.logger.info("Success with EndPoint: "+ str(self.endpoint_url))
@@ -642,7 +748,7 @@ class Plugin(indigo.PluginBase):
                 self.endpoint_url = "http://{}/production".format(dev.pluginProps['sourceXML'])
                 self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
                 headers = self.create_headers( dev)
-                response = self.session.get(  self.endpoint_url, timeout=15,verify=False,  headers=headers, allow_redirects=True)
+                response = self._get(self.endpoint_url, headers=headers)
                 if response.status_code == 200:
                     self.endpoint_type = "P0"       # older Envoy-C
                     self.logger.debug("Success with EndPoint: " + str(self.endpoint_url))
@@ -852,7 +958,8 @@ class Plugin(indigo.PluginBase):
                 #url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
                 # seems to work as http withoput headers for all firmwares?
                 url = f"http://{dev.pluginProps['sourceXML']}/info.xml"
-                response = requests.get( url, timeout=30, allow_redirects=True, verify=False)
+                response = self._get(url, headers=self.create_headers(dev))
+                #response = requests.get( url, timeout=30, allow_redirects=True, verify=False)
                 if len(response.text) > 0:
                     sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
                     self.serial_number_last_six = sn
@@ -892,8 +999,11 @@ class Plugin(indigo.PluginBase):
         try:
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
             headers = self.create_headers( dev)
-            self.logger.debug(f"\n Using URL {url}\n Cookies: {self.session.cookies.get_dict()}\n Headers {headers}")
-            r = self.session.get(url, timeout=35, headers=headers, verify=False, allow_redirects=True)
+            host = urlsplit(url).netloc  # same host key used in _get
+            session = self.session_cache[host]  # auto-creates if first touch
+            self.logger.debug(f"\n Using URL {url}\n Cookies: {session.cookies.get_dict()}\n Headers {headers}")
+            r = self._get( url, headers=headers)
+            #r = self.session.get(url, timeout=35, headers=headers, verify=False, allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(f"Result:{result}")
@@ -908,7 +1018,7 @@ class Plugin(indigo.PluginBase):
             indigo.server.log(u"Error connecting to Device:" + str(dev.name) +" Error is:"+str(error))
             self.WaitInterval = 60
             if self.debugLevel >= 2:
-                self.logger.debug(u"Device is offline. No data to return. ", exc_info=True)
+                self.logger.debug(u"Device is offline. No data to return. ", exc_info=False)
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
             dev.updateStateOnServer('powerStatus', value = 'offline')
             dev.setErrorStateOnServer(u'Offline')
@@ -926,7 +1036,8 @@ class Plugin(indigo.PluginBase):
 
             headers = self.create_headers(dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
-            r = self.session.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
+            r = self._get( url, headers=headers)
+            #r = self.session.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -960,7 +1071,8 @@ class Plugin(indigo.PluginBase):
 
             headers = self.create_headers( dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
-            r = self.session.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
+            r = self._get( url, headers=headers)
+            #r = self.session.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
                 self.debugLog(u"Result:" + str(result))
@@ -1068,7 +1180,8 @@ class Plugin(indigo.PluginBase):
         try:
             headers = self.create_headers(dev)
             url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
-            r = self.session.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
+            r = self._get(url, timeout=35,  headers=headers)
+            #r = self.session.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
             result = r.json()
             if self.debug:
                 self.debugLog(u"Inventory Result:" + str(result))
@@ -1102,9 +1215,12 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >=2:
                     self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
                 if self.https_flag=="s":  # Using check using https in which case token.
-                    r = self.session.get(url,headers=headers, timeout=35,verify=False, allow_redirects=True)
+                    r = self._get( url, timeout=35, headers=headers)
+                    #r = self.session.get(url,headers=headers, timeout=35,verify=False, allow_redirects=True)
                 else:
-                    r = self.session.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
+                    auth = HTTPDigestAuth('envoy', self.serial_number_last_six)
+                    r = self._get( url, timeout=34, headers=headers, auth=auth)
+                    #r = self.session.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.debugLog(f"Inverter Result:{result}")
@@ -1628,7 +1744,7 @@ class Plugin(indigo.PluginBase):
                 return
         t.sleep(20)
 
-    def refreshDataForDev(self, dev):
+    def refreshDataForDev( self, dev):
         if dev.configured:
             if self.debugLevel >= 2:
                 self.debugLog(u"Found configured device: {0}".format(dev.name))
