@@ -653,6 +653,7 @@ class Plugin(indigo.PluginBase):
         password = dev.pluginProps.get("enphase_password","")
         self.logger.debug(f"Use Manual token: {use_token} & Generate Token {generate_token}")
 
+
         if use_token==False and generate_token==False:
             self.logger.debug("Not using Tokens.")
             self.using_token = False
@@ -660,58 +661,24 @@ class Plugin(indigo.PluginBase):
             return headers
 
         self.using_token = True
-        if use_token and auth_token !="":
-            headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
-            if self.debug:
-                self.logger.debug(f"Using Headers: {headers}")
-            self.https_flag = "s"
-            return headers
 
         if use_token and auth_token =="":
             self.logger.error("To use your own manual token you must enter it first.  Please do so asap.")
             return headers
 
-        if self.serial_number_full == "":
+        if use_token and auth_token !="":
+            headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
+            if self.debug:
+                self.logger.debug(f"Using Headers: {headers}")
+            self.https_flag = "s"
 
+        if self.serial_number_full == "":
             self.get_serial_number(dev)
 
         if generate_token:
-            self.logger.info("Not supported.  Please use manual token")
-            return
-            if username == "":
-                self.logger.error("To Generate a token you must enter username in device edit settings for enphase")
-                return headers
-            if password == "":
-                self.logger.error("To Generate a token you must enter password in device edit settings for enphase")
-                return headers
-            if self.serial_number_full == "":
-                self.logger.info("To Generate a token you must have a  serial number")
-                return headers
-            if self.generated_token =="":
-                self.get_enphasetoken(username, password, self.serial_number_full, dev)
-                if self.no_cryptography == False:
-                    if not self._is_enphase_token_expired(self.generated_token):
-                        self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
-                    else:
-                        self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
-            elif self.no_cryptography:
-                self.logger.debug("Skipping any token expiry checking as no cryptography.")
-            elif self._is_enphase_token_expired(self.generated_token):
-                self.get_enphasetoken(username, password, self.serial_number_full, dev)
-                if self.no_cryptography == False:
-                    if not self._is_enphase_token_expired(self.generated_token):
-                        self.logger.info("This Enphase Token expires at: %s", self.generated_token_expiry.strftime("%c"))
-                    else:
-                        self.logger.info("This Enphase Token expired on: %s", self.generated_token_expiry.strftime("%c"))
+            self.logger.info("Not supported anymore.  Please Paste manual token")
 
-            headers = {"Accept": "application/json", "Authorization": "Bearer " + str(self.generated_token)}
-
-
-            if self.debug:
-                    self.logger.debug(f"Using Headers: {headers}")
-            self.login(headers, dev)
-            self.https_flag = "s"  ##  this should be self.https_flag = "s".  Set to "" here for testing only
-            return headers
+        return headers
 
     def login(self, headers, dev):
         try:
@@ -971,7 +938,7 @@ class Plugin(indigo.PluginBase):
                 #headers = self.create_headers( dev)
                 #url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
 
-                url = f"http://{dev.pluginProps['sourceXML']}/info.xml"
+                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
                 response = self._get(url, headers=None, verify=False)
 
                 self.logger.debug(f"{response.text}")
