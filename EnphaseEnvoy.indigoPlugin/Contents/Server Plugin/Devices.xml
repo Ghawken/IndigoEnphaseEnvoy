@@ -20,7 +20,7 @@
       </Field>
          <Field id="sepa2" type="separator"/>
         <Field id="Firmware7" type="label">
-               <Label>One of the two below is required for Firmware >=7</Label></Field>
+               <Label>The below is required for Firmware >=7</Label></Field>
         <Field id="use_token" type="checkbox" defaultValue="false" tooltip="Use Token to access" alwaysUseInDialogHeightCalc="true">
 
       <Label>Use Manual Token:</Label>
@@ -41,21 +41,20 @@
           Create token here: https://entrez.enphaseenergy.com/</Label>
       </Field>
          <Field id="sepaasdaa2" type="separator"/>
-            <Field id="generate_token" type="checkbox" defaultValue="false" tooltip="Use Token to access"  alwaysUseInDialogHeightCalc="true">
+            <Field id="generate_token" type="checkbox" defaultValue="false" tooltip="Use Token to access" hidden="true" alwaysUseInDialogHeightCalc="true">
       <Label>(or) Generate Token:</Label>
       <Description>Required for Firmware >=7</Description>
           </Field>
-        <Field id="enphase_user" type="textfield" defaultValue="" visibleBindingId="generate_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+        <Field id="enphase_user" type="textfield" defaultValue="" visibleBindingId="generate_token" hidden="true" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
         <Label>Enphase Login:</Label>
       </Field>
-        <Field id="enphase_password" type="textfield" defaultValue="" visibleBindingId="generate_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+        <Field id="enphase_password" type="textfield" defaultValue="" visibleBindingId="generate_token" hidden="true" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
         <Label>Enphase Password:</Label>
       </Field>
-      <Field id="exampleabca3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+      <Field id="exampleabca3" type="label" fontSize="small" fontColor="black" alignText="right" hidden="true" visibleBindingId="use_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
         <Label>Some form of Token access needed for firmware >7</Label>
       </Field>
 
-         <Field id="sepaa2" type="separator"/>
 
  <Field id="sep4" type="separator"/>
 

@@ -33,7 +33,8 @@ import datetime
 import threading
 from requests.auth import HTTPDigestAuth
 import jwt
-
+from authentication import Authentication
+import json
 try:
     import indigo
 except:
@@ -350,26 +351,31 @@ class Plugin(indigo.PluginBase):
 
     def get_enphasetoken(self, username, password, serialnumber, dev):
         try:
-            self.logger.info("Logging in to Enphase to generate Enphase Token.  Should only be needed once every 12 months")
-            data = {'user[email]': username, 'user[password]': password}
-            response = requests.post('https://enlighten.enphaseenergy.com/login/login.json?',data=data, timeout=20)
-            if response.status_code >= 400:
-                raise Exception("Could not Authenticate via Enlighten auth form")
-            response_data = json.loads(response.text)
-            data = {'session_id': response_data['session_id'], 'serial_num': serialnumber, 'username':  username}
-            response = requests.post('https://entrez.enphaseenergy.com/tokens', json=data)
-            if response.status_code != 200:
-                raise Exception("Could not get 6 month token: " + response.text)
-            token_raw = response.text
+            self.logger.info(
+                "Logging in to Enphase to generate Enphase Token.  "
+                "Should only be needed once every 12 months"
+            )
+
+            auth = Authentication()
+
+            # Authenticate against Entrez and establish a session
+            if not auth.authenticate(username, password):
+                raise Exception("Could not Authenticate via Entrez authentication server")
+
+            sites = auth.get_site()
+            self.logger.info(f"Found {len(sites)} sites for this account.")
+            self.logger.info(f"Details {sites}")
+            # Generate token using the authenticated session
+            token_raw = auth.get_token_for_commissioned_gateway(serialnumber)
+
             self.logger.info(f"Generated your Enphase account Token:\n{token_raw}")
             self.generated_token = token_raw
 
             return token_raw
-        except:
-            self.logger.debug(f"Exception getting token:", exc_info=True)
-            self.logger.info("Error getting token.. check username and password.  If using generated token then cyptography then needs to be installed.")
-            self.logger.info("Install this by 'pip3 install cryptography' in a terminal window.")
-            self.logger.info("or alternatively manually download the token, which does not need cryptography installed.")
+
+        except Exception:
+            self.logger.debug("Exception getting token:", exc_info=True)
+
 
     def _is_enphase_token_expired(self, token):
         try:
@@ -666,14 +672,20 @@ class Plugin(indigo.PluginBase):
             return headers
 
         if self.serial_number_full == "":
+
             self.get_serial_number(dev)
 
         if generate_token:
+            self.logger.info("Not supported.  Please use manual token")
+            return
             if username == "":
                 self.logger.error("To Generate a token you must enter username in device edit settings for enphase")
                 return headers
             if password == "":
                 self.logger.error("To Generate a token you must enter password in device edit settings for enphase")
+                return headers
+            if self.serial_number_full == "":
+                self.logger.info("To Generate a token you must have a  serial number")
                 return headers
             if self.generated_token =="":
                 self.get_enphasetoken(username, password, self.serial_number_full, dev)
@@ -696,7 +708,7 @@ class Plugin(indigo.PluginBase):
 
 
             if self.debug:
-                self.logger.debug(f"Using Headers: {headers}")
+                    self.logger.debug(f"Using Headers: {headers}")
             self.login(headers, dev)
             self.https_flag = "s"  ##  this should be self.https_flag = "s".  Set to "" here for testing only
             return headers
@@ -718,9 +730,10 @@ class Plugin(indigo.PluginBase):
     def detect_model(self, dev):
         """Method to determine if the Envoy supports consumption values or
          only production"""
+
+        headers =  self.create_headers(dev)
         self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
         self.logger.debug("trying Endpoint:"+str(self.endpoint_url))
-        headers =  self.create_headers(dev)
         self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
 
         #response = self.session.get(  self.endpoint_url, timeout=25, verify=False, headers=headers,allow_redirects=True)
@@ -734,10 +747,10 @@ class Plugin(indigo.PluginBase):
             self.logger.info(f"Response\n:{response}")
             return True
         else:
-            self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
-            self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
+
             headers = self.create_headers( dev)
             self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
+            self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
             response = self._get( self.endpoint_url, headers=headers)
             if response.status_code == 200:
                 self.endpoint_type = "P"       # Envoy-C, production only
@@ -745,9 +758,10 @@ class Plugin(indigo.PluginBase):
                 self.logger.info(f"Response\n:{response}")
                 return True
             else:
-                self.endpoint_url = "http://{}/production".format(dev.pluginProps['sourceXML'])
-                self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
+
                 headers = self.create_headers( dev)
+                self.endpoint_url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production"
+                self.logger.debug("trying Endpoint:" + str(self.endpoint_url))
                 response = self._get(self.endpoint_url, headers=headers)
                 if response.status_code == 200:
                     self.endpoint_type = "P0"       # older Envoy-C
@@ -757,7 +771,7 @@ class Plugin(indigo.PluginBase):
         self.endpoint_url = ""
         self.logger.info(
             "Could not connect or determine Envoy model. " +
-            "Check that the device is up at 'http://" + self.host + "'.")
+            f"Check that the device is up at 'http{self.https_flag}://" + self.host + "'.")
         return False
 
     def call_api(self, dev):
@@ -956,9 +970,11 @@ class Plugin(indigo.PluginBase):
             try:
                 #headers = self.create_headers( dev)
                 #url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/info.xml"
-                # seems to work as http withoput headers for all firmwares?
+
                 url = f"http://{dev.pluginProps['sourceXML']}/info.xml"
-                response = self._get(url, headers=self.create_headers(dev))
+                response = self._get(url, headers=None, verify=False)
+
+                self.logger.debug(f"{response.text}")
                 #response = requests.get( url, timeout=30, allow_redirects=True, verify=False)
                 if len(response.text) > 0:
                     sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
@@ -997,8 +1013,9 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getTheData PRODUCTION METHOD method called.")
 
         try:
-            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
             headers = self.create_headers( dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/production.json"
+
             host = urlsplit(url).netloc  # same host key used in _get
             session = self.session_cache[host]  # auto-creates if first touch
             self.logger.debug(f"\n Using URL {url}\n Cookies: {session.cookies.get_dict()}\n Headers {headers}")
@@ -1179,7 +1196,7 @@ class Plugin(indigo.PluginBase):
             self.debugLog(u"getInventoryData Enphase Panels method called.")
         try:
             headers = self.create_headers(dev)
-            url = f"http://{dev.pluginProps['sourceXML']}/inventory.json"
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/inventory.json"
             r = self._get(url, timeout=35,  headers=headers)
             #r = self.session.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
             result = r.json()
