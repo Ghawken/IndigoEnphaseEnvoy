@@ -137,7 +137,7 @@ class Plugin(indigo.PluginBase):
         self.force_update = set()  # dev.id values needing immediate refresh
 
         #self.session = requests.Session()
-
+        self.log_manual_expiry = True
         self.timeOutCount = 0
        # self.debug = self.pluginPrefs.get('showDebugInfo', False)
         self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
@@ -826,12 +826,15 @@ class Plugin(indigo.PluginBase):
         password = dev.pluginProps.get("enphase_password","")
         self.logger.debug(f"Use Manual token: {use_token} & Generate Token {generate_token}")
 
+
         if use_token==False and generate_token==False:
             self.logger.debug("Not using Tokens.")
             self.using_token = False
             self.https_flag=""
             return headers
 
+        # always set https flag if using any token, indicates Firmware >7
+        self.https_flag = "s"
         self.using_token = True
 
         if use_token and auth_token =="":
@@ -839,9 +842,17 @@ class Plugin(indigo.PluginBase):
             return headers
 
         if use_token and auth_token !="":
+            # Using manual token
             headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
             self.logger.debug(f"Using Headers: {headers}")
-            self.https_flag = "s"
+            if self.log_manual_expiry:
+                exp = self._get_enphase_token_expiry(auth_token)
+                self.logger.info(
+                    f"[{dev.name}] Using Manual Enphase token. Expires: %s ",
+                    datetime.datetime.fromtimestamp(exp).strftime("%c") if exp else "<unknown>"
+                )
+                self.log_manual_expiry = False
+
 
         if self.serial_number_full.get(dev.id, "") == "":
             self.get_serial_number(dev)
@@ -1925,16 +1936,17 @@ class Plugin(indigo.PluginBase):
         if self.debugLevel >= 2:
             self.logger.debug(u"Type of Envoy Checking...: {0}".format(dev.name))
         data = self.getTheData(dev)
-        if "production" in data:
-            if len(data['production']) > 1 and int(data['production'][1]['whLifetime']) == 0:
-                self.logger.debug("whLifetime Checked: Equals Zero.  Seems Unmetered version.")
-                dev.updateStateOnServer('typeEnvoy', value="Unmetered")
-                return
-            else:
-                dev.updateStateOnServer('typeEnvoy', value="Metered")
-                self.logger.debug("Envoy-S Metered Version Found.  Continuing.")
-                self.parseStateValues(dev, data)
-                return
+        if data is not None:
+            if "production" in data:
+                if len(data['production']) > 1 and int(data['production'][1]['whLifetime']) == 0:
+                    self.logger.debug("whLifetime Checked: Equals Zero.  Seems Unmetered version.")
+                    dev.updateStateOnServer('typeEnvoy', value="Unmetered")
+                    return
+                else:
+                    dev.updateStateOnServer('typeEnvoy', value="Metered")
+                    self.logger.debug("Envoy-S Metered Version Found.  Continuing.")
+                    self.parseStateValues(dev, data)
+                    return
         t.sleep(20)
 
     def refreshDataForDev( self, dev):
