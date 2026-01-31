@@ -14,12 +14,7 @@ import sys
 import time as t
 import hashlib
 import requests
-try:
-    # For Python 3.0 and later
-    from urllib.request import urlopen
-except ImportError:
-    # Fall back to Python 2's urllib2
-    from urllib2 import urlopen
+from urllib.request import urlopen
 
 from urllib.parse import urlsplit
 import time
@@ -27,13 +22,16 @@ from collections import defaultdict
 import os
 import shutil
 import flatdict
+import traceback
+from os import path
 import re
 import logging
 import datetime
 import threading
 from requests.auth import HTTPDigestAuth
 import jwt
-from authentication import Authentication
+from authentication import EnphaseTokenManager
+
 import json
 try:
     import indigo
@@ -62,20 +60,115 @@ LIFE_PRODUCTION_REGEX = \
     r'<td>Since Installation</td>\s+<td>\s*(\d+|\d+\.\d+)\s*(Wh|kWh|MWh)</td>'
 
 
+class IndigoLogHandler(logging.Handler):
+    def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
+
+        super().__init__(level)
+        self.displayName = display_name
+        self.force_debug = force_debug  # if True, always log at DEBUG to Indigo
+
+    def emit(self, record):
+        logmessage = ""
+        is_error = False
+        # Original level from logger
+        orig_level = getattr(record, "levelno", logging.INFO)
+
+        # What level Indigo sees
+        levelno = logging.DEBUG if self.force_debug else orig_level
+        try:
+            if self.level <= levelno:
+                is_exception = record.exc_info is not None
+
+                if levelno == 5 or levelno == logging.DEBUG:
+                    logmessage = "({}:{}:{}): {}".format(
+                        path.basename(record.pathname),
+                        record.funcName,
+                        record.lineno,
+                        record.getMessage(),
+                    )
+                elif levelno == logging.INFO:
+                    logmessage = record.getMessage()
+                elif levelno == logging.WARNING:
+                    logmessage = record.getMessage()
+                elif levelno == logging.ERROR:
+                    logmessage = "({}: Function: {}  line: {}):    Error :  Message : {}".format(
+                        path.basename(record.pathname),
+                        record.funcName,
+                        record.lineno,
+                        record.getMessage(),
+                    )
+                    is_error = True
+
+                if is_exception:
+                    logmessage = "({}: Function: {}  line: {}):    Exception :  Message : {}".format(
+                        path.basename(record.pathname),
+                        record.funcName,
+                        record.lineno,
+                        record.getMessage(),
+                    )
+                    indigo.server.log(message=logmessage, type=self.displayName, isError=is_error, level=levelno)
+                    exc = record.exc_info
+                    if isinstance(exc, tuple) and len(exc) == 3 and exc[2] is not None:
+                        etype, value, tb = exc
+                        tb_string = "".join(traceback.format_tb(tb))
+                        indigo.server.log(f"Traceback:\n{tb_string}", type=self.displayName, isError=is_error,
+                                          level=levelno)
+                        indigo.server.log(f"Error in plugin execution:\n\n{traceback.format_exc(30)}",
+                                          type=self.displayName, isError=is_error, level=levelno)
+                    else:
+                        # exc_info may be True/False or missing traceback; don't crash the logger
+                        indigo.server.log(f"exc_info present but not a traceback tuple: {exc!r}",
+                                          type=self.displayName, isError=is_error, level=levelno)
+                    return
+
+                indigo.server.log(message=logmessage, type=self.displayName, isError=is_error, level=levelno)
+        except Exception as ex:
+            indigo.server.log(f"Error in Logging: {ex}", type=self.displayName, isError=True, level=logging.ERROR)
+
+
 
 
 class Plugin(indigo.PluginBase):
     def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
         indigo.PluginBase.__init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
-        self.debugLog(u"Initializing Enphase plugin.")
+        self.logger.debug(u"Initializing Enphase plugin.")
 
         self.session_cache = defaultdict(self._new_session)
+        self.force_update = set()  # dev.id values needing immediate refresh
 
         #self.session = requests.Session()
 
         self.timeOutCount = 0
-        self.debug = self.pluginPrefs.get('showDebugInfo', False)
+       # self.debug = self.pluginPrefs.get('showDebugInfo', False)
         self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
+        if hasattr(self, "indigo_log_handler") and self.indigo_log_handler:
+            self.logger.removeHandler(self.indigo_log_handler)
+
+        # Collect everything at logger; handlers filter
+        self.logger.setLevel(logging.DEBUG)
+
+        try:
+            self.logLevel = int(self.pluginPrefs.get("showDebugLevel", logging.INFO))
+            self.fileloglevel = int(self.pluginPrefs.get("showDebugFileLevel", logging.DEBUG))
+        except Exception:
+            self.logLevel = logging.INFO
+            self.fileloglevel = logging.DEBUG
+        # Indigo handler for plugin messages (respects user-selected level)
+        try:
+            self.indigo_log_handler = IndigoLogHandler(pluginDisplayName, level=self.logLevel, force_debug=False)
+            self.indigo_log_handler.setFormatter(logging.Formatter("%(message)s"))
+            self.logger.addHandler(self.indigo_log_handler)
+        except Exception as exc:
+            indigo.server.log(f"Failed to create IndigoLogHandler: {exc}", isError=True)
+
+        # File handler
+        try:
+            self.plugin_file_handler.setLevel(self.fileloglevel)
+            # Attach to plugin logger
+            self.logger.addHandler(self.plugin_file_handler)
+        except Exception as exc:
+            self.logger.exception(exc)
+
         self.deviceNeedsUpdated = ''
         self.prefServerTimeout = int(self.pluginPrefs.get('configMenuServerTimeout', "15"))
         self.https_flag = ""
@@ -86,13 +179,14 @@ class Plugin(indigo.PluginBase):
         self.WaitInterval = 0
         self.endpoint_type = ""
         self.endpoint_url = ""
-        self.generated_token = ""
+        self.generated_token = {}  # dev.id -> token string
 
         self.using_token = False
 
         self.generated_token_expiry = datetime.datetime.now()
-        self.serial_number_last_six = ""
-        self.serial_number_full = ""
+        self.serial_number_full = {}  # dev.id -> full serial
+        self.serial_number_last_six = {}  # dev.id -> last 6
+
         self.EnvoyStype = ""
         self.logger.info(u"")
         self.logger.info(u"{0:=^130}".format(" Initializing New Plugin Session "))
@@ -104,23 +198,7 @@ class Plugin(indigo.PluginBase):
         self.logger.info(u"{0:<30} {1}".format("Python Directory:", sys.prefix.replace('\n', '')))
         self.logger.info(u"{0:=^130}".format(" End Initializing New Plugin Session "))
 
-        # Convert old debugLevel scale to new scale if needed.
-        # =============================================================
-        if not isinstance(self.pluginPrefs['showDebugLevel'], int):
-            if self.pluginPrefs['showDebugLevel'] == "High":
-                self.pluginPrefs['showDebugLevel'] = 3
-            elif self.pluginPrefs['showDebugLevel'] == "Medium":
-                self.pluginPrefs['showDebugLevel'] = 2
-            else:
-                self.pluginPrefs['showDebugLevel'] = 1
 
-        try:
-            import cryptography
-            self.no_cryptography = False
-        except:
-            self.logger.info("Python Module cryptograph not installed.  Ideally this should be installed to allow token expiry checking")
-            self.logger.info("To install from terminal type 'pip3 install cryptography'.  The plugin will need to be restarted.")
-            self.no_cryptography = True
 
     def _new_session(self):
         """Create a fresh requests.Session with keep-alive and TLS disabled."""
@@ -133,75 +211,101 @@ class Plugin(indigo.PluginBase):
     # ─────────────────────────────────────────────────────────────
     # Generic GET  – headers mandatory, auth optional, detailed logging
     # ─────────────────────────────────────────────────────────────
-    def _get(self, url, *, headers, timeout=15, auth=None, **kwargs):
+    def _get(self, url, *, headers, timeout=35, auth=None, **kwargs):
         """
         Fetch *url* with a per-host Session, emitting DEBUG logs that show
         whether we are creating or re-using the session for this host.
         """
-        host = urlsplit(url).netloc  # e.g. "192.168.1.50"
-        is_new = host not in self.session_cache  # defaultdict check *before* lookup
-        session = self.session_cache[host]  # auto-creates if missing
-
-        # ── session creation / reuse info ───────────────────────
-        if is_new:
-            self.logger.debug(
-                f"[HTTP] Created NEW session {hex(id(session))} for host {host}"
-            )
-        else:
-            self.logger.debug(
-                f"[HTTP] Re-using session {hex(id(session))} for host {host}"
-            )
-
-        # ── outgoing request details ────────────────────────────
-        self.logger.debug(
-            f"[HTTP] GET {url}\n"
-            f"       timeout={timeout!r}  auth={'YES' if auth else 'NO'}\n"
-            f"       headers={headers}\n"
-            f"       cookies={session.cookies.get_dict()}"
-        )
-
         try:
-            resp = session.get(
-                url,
-                headers=headers,
-                timeout=timeout,
-                auth=auth,
-                allow_redirects=True,
-                **kwargs
+            host = urlsplit(url).netloc  # e.g. "192.168.1.50"
+            is_new = host not in self.session_cache  # defaultdict check *before* lookup
+            session = self.session_cache[host]  # auto-creates if missing
+
+            # ── session creation / reuse info ───────────────────────
+            if is_new:
+                self.logger.debug(
+                    f"[HTTP] Created NEW session {hex(id(session))} for host {host}"
+                )
+            else:
+                self.logger.debug(
+                    f"[HTTP] Re-using session {hex(id(session))} for host {host}"
+                )
+
+            # ── outgoing request details ────────────────────────────
+            self.logger.debug(
+                f"[HTTP] GET {url}\n"
+                f"       timeout={timeout!r}  auth={'YES' if auth else 'NO'}\n"
+                f"       headers={headers}\n"
+                f"       cookies={session.cookies.get_dict()}"
             )
 
-            self.logger.debug(
-                f"[HTTP] {host} → {resp.status_code}  "
-                f"(session {hex(id(session))})"
-            )
-            return resp
+            try:
+                resp = session.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    auth=auth,
+                    allow_redirects=True,
+                    **kwargs
+                )
 
-        except requests.exceptions.RequestException as err:
-            # ── connection/TLS error; drop pool and log ─────────
-            self.logger.debug(
-                f"[HTTP] ERROR for host {host}: {err} — "
-                f"closing session {hex(id(session))} and recreating"
-            )
-            session.close()
-            self.session_cache[host] = self._new_session()
+                self.logger.debug(
+                    f"[HTTP] {host} → {resp.status_code}  "
+                    f"(session {hex(id(session))})"
+                )
+                return resp
+
+            except requests.exceptions.Timeout as err:
+                self.logger.debug(
+                    f"[HTTP] TIMEOUT for host {host}: {err} — "
+                    f"closing session {hex(id(session))} and recreating"
+                )
+                session.close()
+                self.session_cache[host] = self._new_session()
+                self.WaitInterval = 60
+                raise
+
+            except requests.exceptions.RequestException as err:
+                # ── connection/TLS error; drop pool and log ─────────
+                self.logger.debug(
+                    f"[HTTP] ERROR for host {host}: {err} — "
+                    f"closing session {hex(id(session))} and recreating"
+                )
+                session.close()
+                self.session_cache[host] = self._new_session()
+                raise
+
+        except Exception as err:
+            self.logger.debug(f"Exception in _get {err}")
             raise
 
     def __del__(self):
-        if self.debugLevel >= 2:
-            self.debugLog(u"__del__ method called.")
+        self.logger.debug(u"__del__ method called.")
         indigo.PluginBase.__del__(self)
 
     def closedPrefsConfigUi(self, valuesDict, userCancelled):
-        if self.debugLevel >= 2:
-            self.debugLog(u"closedPrefsConfigUi() method called.")
+        self.logger.debug(u"closedPrefsConfigUi() method called.")
 
         if userCancelled:
-            self.debugLog(u"User prefs dialog cancelled.")
+            self.logger.debug(u"User prefs dialog cancelled.")
 
         if not userCancelled:
             self.debug = valuesDict.get('showDebugInfo', False)
             self.debugLevel = self.pluginPrefs.get('showDebugLevel', "1")
-            self.debugLog(u"User prefs saved.")
+            self.logger.debug(u"User prefs saved.")
+
+            self.pluginPrefs["showDebugInfo"] = bool(valuesDict.get("showDebugInfo", False))
+            self.pluginPrefs["showDebugLevel"] = int(valuesDict.get("showDebugLevel", logging.INFO))
+            self.pluginPrefs["showDebugFileLevel"] = int(valuesDict.get("showDebugFileLevel", logging.DEBUG))
+
+            self.logLevel = int(valuesDict.get("showDebugLevel", logging.INFO))
+            self.fileloglevel = int(valuesDict.get("showDebugFileLevel", logging.DEBUG))
+            show_lib_debug = bool(valuesDict.get("showDebugInfo", False))
+            if hasattr(self, "indigo_log_handler") and self.indigo_log_handler:
+                self.indigo_log_handler.setLevel(self.logLevel)
+            if hasattr(self, "plugin_file_handler") and self.plugin_file_handler:
+                self.plugin_file_handler.setLevel(self.fileloglevel)
+            indigo.server.savePluginPrefs()
             self.debugupdate = valuesDict.get('debugupdate', False)
             self.openStore = valuesDict.get('openStore', False)
 
@@ -211,14 +315,13 @@ class Plugin(indigo.PluginBase):
                 indigo.server.log(u"Debugging off.")
 
             if int(self.pluginPrefs['showDebugLevel']) >= 3:
-                self.debugLog(u"valuesDict: {0} ".format(valuesDict))
+                self.logger.debug(u"valuesDict: {0} ".format(valuesDict))
 
         return True
 
     # Start 'em up.
     def deviceStartComm(self, dev):
-        if self.debugLevel >= 2:
-            self.debugLog(u"deviceStartComm() method called.")
+ #       self.logger.debug(u"deviceStartComm() method called.")
         #self.errorLog(str(dev.model))
 
         # CHECK IF PANEL - IF PANEL START OFFLINE
@@ -237,6 +340,8 @@ class Plugin(indigo.PluginBase):
         dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
+        self.force_update.add(dev.id)
+
         dev.stateListOrDisplayStateIdChanged()
 
 
@@ -249,7 +354,7 @@ class Plugin(indigo.PluginBase):
 # """"
 #     def getDeviceStateList(self,dev):
 #         if self.debugLevel>=2:
-#             self.debugLog(u'getDeviceStateList called')
+#             self.logger.debug(u'getDeviceStateList called')
 #
 #         stateList = indigo.PluginBase.getDeviceStateList(self, dev)
 #         if stateList is not None:
@@ -291,9 +396,8 @@ class Plugin(indigo.PluginBase):
 
     # Shut 'em down.
     def deviceStopComm(self, dev):
-        if self.debugLevel >= 2:
-            self.debugLog(u"deviceStopComm() method called.")
-        indigo.server.log(u"Stopping Enphase device: " + dev.name + " and id:"+str(dev.model))
+        self.logger.debug(u"deviceStopComm() method called.")
+        self.logger.debug(u"Stopping Enphase device: " + dev.name + " and id:"+str(dev.model))
         dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Disabled")
         if dev.model == 'Enphase Envoy-S' :
             dev.updateStateOnServer('powerStatus', value='offline', uiValue='Offline')
@@ -339,7 +443,7 @@ class Plugin(indigo.PluginBase):
         indigo.server.log(u'Manually Refreshing Enphase Data:')
         for dev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
             if self.debugLevel >= 2:
-                self.debugLog(u'Quick Checks Before Loop')
+                self.logger.debug(u'Quick Checks Before Loop')
             if dev.enabled:
                 self.refreshDataForDev(dev)
                 self.sleep(30)
@@ -350,32 +454,78 @@ class Plugin(indigo.PluginBase):
         return
 
     def get_enphasetoken(self, username, password, serialnumber, dev):
+        """
+        Fetch a valid Enphase token using pyenphase-style logic (like HA).
+        - Uses cached/manual token if present (device/plugin prefs)
+        - Refreshes token when near expiry or missing (requires cloud username/password + serial)
+        - If refresh succeeds, persist the new token
+        """
         try:
             self.logger.info(
-                "Logging in to Enphase to generate Enphase Token.  "
-                "Should only be needed once every 12 months"
+                "Obtaining Enphase token (pyenphase). "
+                "A valid token is typically needed for local Envoy API access."
             )
 
-            auth = Authentication()
+            # 1) Get any existing token you may already have stored
+            # Prefer device plugin props if you store per-device; otherwise pluginPrefs.
+            existing_token = None
+            try:
+                # If dev is an Indigo device, you might be storing token in pluginProps:
+                # existing_token = dev.pluginProps.get("enphase_token")
+                # If not, fall back to pluginPrefs:
+                existing_token = dev.pluginPrefs.get("auth_token")
+            except Exception:
+                existing_token = None
 
-            # Authenticate against Entrez and establish a session
-            if not auth.authenticate(username, password):
-                raise Exception("Could not Authenticate via Entrez authentication server")
+            # 2) Determine Envoy host/ip from the device if you have it
+            # (Adjust this to however you store the Envoy IP/hostname)
+            try:
+                envoy_host = dev.pluginProps.get("sourceXML")
+            except Exception:
+                envoy_host = getattr(dev, "sourceXML", None)
 
-            sites = auth.get_site()
-            self.logger.info(f"Found {len(sites)} sites for this account.")
-            self.logger.info(f"Details {sites}")
-            # Generate token using the authenticated session
-            token_raw = auth.get_token_for_commissioned_gateway(serialnumber)
+            if not envoy_host:
+                self.logger.info("Please setup IP address of Device")
+                return
 
-            self.logger.info(f"Generated your Enphase account Token:\n{token_raw}")
-            self.generated_token = token_raw
+            # 3) Create token manager
+            tm = EnphaseTokenManager(
+                host=envoy_host,
+                cloud_username=username,
+                cloud_password=password,
+                envoy_serial=serialnumber,
+                token=existing_token,
+                logger=self.logger,
+                # refresh when within 7 days of expiry (tune as desired)
+                refresh_margin_seconds=7 * 24 * 3600,
+                timeout_seconds=60,
+            )
+
+            # 4) Get token (refreshes only if needed)
+            token_raw = tm.get_token()
+
+            if not token_raw or not token_raw.strip():
+                raise Exception("No token returned from token manager.")
+
+            # 6) Do NOT log full token
+            self.logger.debug(f"Enphase token ready {token_raw})")
+            self.generated_token[dev.id] = token_raw
+            localPropsCopy = dev.pluginProps
+            localPropsCopy["auth_token"] = token_raw
+            dev.replacePluginPropsOnServer(localPropsCopy)
 
             return token_raw
 
         except Exception:
             self.logger.debug("Exception getting token:", exc_info=True)
+            return None
 
+    def _get_enphase_token_expiry(self, token):
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            return int(payload.get("exp")) if payload.get("exp") else None
+        except Exception:
+            return None
 
     def _is_enphase_token_expired(self, token):
         try:
@@ -406,8 +556,8 @@ class Plugin(indigo.PluginBase):
 ########### Get Installer Password
     def installer_password(self, valuesDict, typeId, devId):
         self.logger.info("Checking endpoints.")
-
-        gSerialNumber = self.serial_number_full.encode("utf-8")
+        dev = indigo.devices[devId]
+        gSerialNumber = self.serial_number_full.get(dev.id,"").encode("utf-8")
         if len(gSerialNumber) <2:
             self.logger.info(f"Serial Number : {gSerialNumber} appears incorrect")
             return
@@ -523,6 +673,7 @@ class Plugin(indigo.PluginBase):
 
         # timers[dev.id][check_name] → last-run timestamp
         timers = defaultdict(lambda: defaultdict(lambda: NOW()))
+        enabled_state = {}  # dev.id -> last enabled bool
 
         # ─────────────────────────────────────────────────────────
         # Helper: run-and-reset
@@ -551,12 +702,12 @@ class Plugin(indigo.PluginBase):
             for dev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
                 if dev.enabled:
                     self.refreshDataForDev(dev)
-                    self.sleep(15)
+                    self.sleep(5)
 
             for dev in indigo.devices.iter('self.EnphaseEnvoyLegacy'):
                 if dev.enabled:
                     self.legacyRefreshEnvoy(dev)
-                    self.sleep(15)
+                    self.sleep(5)
 
             # ── Main loop ───────────────────────────────────────
             while True:
@@ -565,7 +716,20 @@ class Plugin(indigo.PluginBase):
                 for dev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
                     if not dev.enabled:
                         continue
+
+                        # If device was just enabled, force immediate checks
+                    if enabled_state.get(dev.id) is not True:
+                        enabled_state[dev.id] = True
+                        ts = timers[dev.id]
+                        for k in CHECKS:
+                            ts[k] = 0
+
                     ts = timers[dev.id]
+                    # Force immediate update after stop/start or device restart
+                    if dev.id in self.force_update:
+                        for k in CHECKS:
+                            ts[k] = 0
+                        self.force_update.discard(dev.id)
 
                     _run_check(ts, "datetime", CHECKS["datetime"], self.checkDayTime, dev)
                     _run_check(ts, "envoy_type", CHECKS["envoy_type"], self.checkEnvoyType, dev)
@@ -578,8 +742,17 @@ class Plugin(indigo.PluginBase):
                 # Legacy Envoy devices
                 for dev in indigo.devices.iter('self.EnphaseEnvoyLegacy'):
                     if not dev.enabled:
+                        enabled_state[dev.id] = False
                         continue
+
+                    if enabled_state.get(dev.id) is not True:
+                        enabled_state[dev.id] = True
+                        timers[dev.id]["envoy_refresh"] = 0
+
                     ts = timers[dev.id]
+                    if dev.id in self.force_update:
+                        ts["envoy_refresh"] = 0
+                        self.force_update.discard(dev.id)
                     _run_check(ts, "envoy_refresh", CHECKS["envoy_refresh"], self.legacyRefreshEnvoy, dev)
                     self.sleep(1)
 
@@ -600,7 +773,7 @@ class Plugin(indigo.PluginBase):
                 self.sleep(25)  # base loop delay
 
         except self.StopThread:
-            self.debugLog("Stopping Enphase/Envoy thread.")
+            self.logger.debug("Stopping Enphase/Envoy thread.")
         except Exception:
             self.logger.exception("Unhandled exception in Enphase/Envoy thread")
             self.WaitInterval = 60
@@ -620,17 +793,17 @@ class Plugin(indigo.PluginBase):
 
     def shutdown(self):
         if self.debugLevel >= 2:
-            self.debugLog(u"shutdown() method called.")
+            self.logger.debug(u"shutdown() method called.")
 
     def startup(self):
         if self.debugLevel >= 2:
-            self.debugLog(u"Starting Enphase Plugin. startup() method called.")
+            self.logger.debug(u"Starting Enphase Plugin. startup() method called.")
 
         # See if there is a plugin update and whether the user wants to be notified.
 
     def validatePrefsConfigUi(self, valuesDict):
         if self.debugLevel >= 2:
-            self.debugLog(u"validatePrefsConfigUi() method called.")
+            self.logger.debug(u"validatePrefsConfigUi() method called.")
 
         error_msg_dict = indigo.Dict()
 
@@ -653,7 +826,6 @@ class Plugin(indigo.PluginBase):
         password = dev.pluginProps.get("enphase_password","")
         self.logger.debug(f"Use Manual token: {use_token} & Generate Token {generate_token}")
 
-
         if use_token==False and generate_token==False:
             self.logger.debug("Not using Tokens.")
             self.using_token = False
@@ -668,15 +840,45 @@ class Plugin(indigo.PluginBase):
 
         if use_token and auth_token !="":
             headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
-            if self.debug:
-                self.logger.debug(f"Using Headers: {headers}")
+            self.logger.debug(f"Using Headers: {headers}")
             self.https_flag = "s"
 
-        if self.serial_number_full == "":
+        if self.serial_number_full.get(dev.id, "") == "":
             self.get_serial_number(dev)
 
         if generate_token:
-            self.logger.info("Not supported anymore.  Please Paste manual token")
+            self.https_flag="s"
+            # Startup: only when we haven't loaded token into memory yet
+            if self.generated_token.get(dev.id, "") == "":
+                saved = dev.pluginProps.get("auth_token", "")
+                if saved:
+                    try:
+                        exp = self._get_enphase_token_expiry(saved)
+                        self.logger.info(
+                            f"[{dev.name}] Using saved Enphase token. Expires: %s — will auto-refresh before expiry.",
+                            datetime.datetime.fromtimestamp(exp).strftime("%c") if exp else "<unknown>"
+                        )
+                        dev.updateStateOnServer("token_expires", f"{datetime.datetime.fromtimestamp(exp).strftime('%c') if exp else 'unknown'}")
+                    except Exception:
+                        self.logger.debug("Saved token found, but could not parse expiry.", exc_info=True)
+                else:
+                    self.logger.info(
+                        "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
+
+            # Load token into runtime cache (after the one-time log)
+            self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id, "")
+
+            if username == "":
+                self.logger.error("To Generate a token you must enter username in device edit settings for enphase")
+                return headers
+            if password == "":
+                self.logger.error("To Generate a token you must enter password in device edit settings for enphase")
+                return headers
+            if (not self.generated_token.get(dev.id, "")) or self._is_enphase_token_expired(self.generated_token[dev.id]):
+                self.get_enphasetoken(username, password, self.serial_number_full.get(dev.id,""), dev)
+                # (optional but safe) reload in case get_enphasetoken saved to pluginProps
+                self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id,"")
+            headers = {"Accept": "application/json",  "Authorization": "Bearer " + str(self.generated_token.get(dev.id, ""))}
 
         return headers
 
@@ -768,7 +970,7 @@ class Plugin(indigo.PluginBase):
 
     def getTheDataAllModels(self,dev):
         if self.debugLevel >= 2:
-            self.debugLog(u"getTheDataAll Models method called.")
+            self.logger.debug(u"getTheDataAll Models method called.")
         self.logger.debug("Checking Model & getting data of dev.id" + str(dev.name))
 
         if self.endpoint_type == "":
@@ -779,7 +981,7 @@ class Plugin(indigo.PluginBase):
             else:
                 self.WaitInterval = 60
                 if self.debugLevel >= 2:
-                    self.debugLog(u"Device is offline. No data to return. ")
+                    self.logger.debug(u"Device is offline. No data to return. ")
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 dev.updateStateOnServer('powerStatus', value='offline')
                 dev.setErrorStateOnServer(u'Offline')
@@ -945,20 +1147,29 @@ class Plugin(indigo.PluginBase):
                 #response = requests.get( url, timeout=30, allow_redirects=True, verify=False)
                 if len(response.text) > 0:
                     sn = response.text.split("<sn>")[1].split("</sn>")[0][-6:]
-                    self.serial_number_last_six = sn
-                    self.serial_number_full = response.text.split("<sn>")[1].split("</sn>")[0]
-                    self.logger.debug("Found 6 digit Serial Number:"+str(self.serial_number_last_six))
-                    self.logger.info("Found Full Enphase Envoy Serial Number:" + str(self.serial_number_full))
+                    self.serial_number_last_six[dev.id] = sn
+                    self.serial_number_full[dev.id] = response.text.split("<sn>")[1].split("</sn>")[0]
+                    software = response.text.split("<software>")[1].split("</software>")[0] if "<software>" in response.text else ""
+                    imeter = response.text.split("<imeter>")[1].split("</imeter>")[0] if "<imeter>" in response.text else ""
+
+                    self.logger.debug(f"[{dev.name}] Found 6 digit Serial Number:"+str(self.serial_number_last_six[dev.id]))
+                    self.logger.info(f"[{dev.name}] Found Full Enphase Envoy Serial Number:" + str(self.serial_number_full[dev.id]))
+                    dev.updateStateOnServer("serial_number", f"{self.serial_number_full[dev.id]}")
+                    if software:
+                        self.logger.info(f"[{dev.name}] Envoy firmware: {software}")
+                        dev.updateStateOnServer('firmware_version', value=f"{software}")
+                    if imeter:
+                        self.logger.debug(f"[{dev.name}] iMeter enabled: {imeter}")
                     return True
             except requests.exceptions.ConnectionError:
-                self.logger.info("Error connecting to info.xml to find Serial Number")
+                self.logger.info(f"Error connecting to info.xml to find Serial Number")
                 return False
         else:
             self.logger.debug("Using Serial Number entered manually in device settings.")
-            self.serial_number_last_six = serial_num[-6:]
-            self.serial_number_full = serial_num
-            self.logger.debug("Found 6 digit Serial Number:" + str(self.serial_number_last_six))
-            self.logger.info("Found Full Enphase Envoy Serial Number:" + str(self.serial_number_full))
+            self.serial_number_last_six[dev.id] = serial_num[-6:]
+            self.serial_number_full[dev.id] = serial_num
+            self.logger.debug("Found 6 digit Serial Number:" + str(self.serial_number_last_six[dev.id]))
+            self.logger.info(f"[{dev.name}] Found Full Enphase Envoy Serial Number:" + str(self.serial_number_ful[dev.id]))
             return serial_num[-6:]
 
     def gettheDataChoice(self,dev):
@@ -977,7 +1188,7 @@ class Plugin(indigo.PluginBase):
         The getTheData() method is used to retrieve  API Client Data
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"getTheData PRODUCTION METHOD method called.")
+            self.logger.debug(u"getTheData PRODUCTION METHOD method called.")
 
         try:
             headers = self.create_headers( dev)
@@ -989,8 +1200,7 @@ class Plugin(indigo.PluginBase):
             r = self._get( url, headers=headers)
             #r = self.session.get(url, timeout=35, headers=headers, verify=False, allow_redirects=True)
             result = r.json()
-            if self.debugLevel >= 2:
-                self.debugLog(f"Result:{result}")
+            self.logger.debug(f"Result:{result}")
 
             dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
             dev.setErrorStateOnServer(None)
@@ -998,11 +1208,10 @@ class Plugin(indigo.PluginBase):
             return result
 
         except Exception as error:
-
+            self.logger.debug("Exception:", exc_info=True)
             indigo.server.log(u"Error connecting to Device:" + str(dev.name) +" Error is:"+str(error))
             self.WaitInterval = 60
-            if self.debugLevel >= 2:
-                self.logger.debug(u"Device is offline. No data to return. ", exc_info=False)
+            self.logger.debug(u"Device is offline. No data to return. ", exc_info=False)
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
             dev.updateStateOnServer('powerStatus', value = 'offline')
             dev.setErrorStateOnServer(u'Offline')
@@ -1014,7 +1223,7 @@ class Plugin(indigo.PluginBase):
         The getTheData() method is used to retrieve  API Client Data
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"legacygetTheData PRODUCTION METHOD method called.")
+            self.logger.debug(u"legacygetTheData PRODUCTION METHOD method called.")
 
         try:
 
@@ -1024,7 +1233,7 @@ class Plugin(indigo.PluginBase):
             #r = self.session.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
-                self.debugLog(u"Result:" + str(result))
+                self.logger.debug(u"Result:" + str(result))
             dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
             dev.setErrorStateOnServer(None)
             self.WaitInterval = 0
@@ -1036,7 +1245,7 @@ class Plugin(indigo.PluginBase):
             indigo.server.log(u"Error connecting to Device:" + str(dev.name) +"Error is:"+str(error))
             self.WaitInterval = 60
             if self.debugLevel >= 2:
-                self.debugLog(u"Device is offline. No data to return. ")
+                self.logger.debug(u"Device is offline. No data to return. ")
             dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
             dev.updateStateOnServer('powerStatus', value='offline', uiValue='Offline')
             #dev.updateStateOnServer('powerStatus', value = 'offline')
@@ -1049,7 +1258,7 @@ class Plugin(indigo.PluginBase):
         The getTheData() method is used to retrieve  API Client Data
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"getAPIDataConsumption METHOD method called.")
+            self.logger.debug(u"getAPIDataConsumption METHOD method called.")
 
         try:
 
@@ -1059,7 +1268,7 @@ class Plugin(indigo.PluginBase):
             #r = self.session.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
             result = r.json()
             if self.debugLevel >= 2:
-                self.debugLog(u"Result:" + str(result))
+                self.logger.debug(u"Result:" + str(result))
             self.WaitInterval = 0
             return result
 
@@ -1070,7 +1279,7 @@ class Plugin(indigo.PluginBase):
 
     def checkThePanels_New(self,dev, thePanels=None):
         if self.debugLevel >= 2:
-            self.debugLog(u'check thepanels called')
+            self.logger.debug(u'check thepanels called')
         if dev.pluginProps['activatePanels']:
             if thePanels == None:
                 self.thePanels = self.getthePanels(dev)
@@ -1111,7 +1320,7 @@ class Plugin(indigo.PluginBase):
 
     def checkPanelInventory(self,dev):
         if self.debugLevel >= 2:
-            self.debugLog(u"checkPanelInventory Enphase Panels method called.")
+            self.logger.debug(u"checkPanelInventory Enphase Panels method called.")
 
         if dev.pluginProps['activatePanels'] and dev.states['deviceIsOnline']:
             self.inventoryDict = self.getInventoryData(dev)
@@ -1121,7 +1330,7 @@ class Plugin(indigo.PluginBase):
                     for dev in indigo.devices.iter('self.EnphasePanelDevice'):
                         for devices in self.inventoryDict[0]['devices']:
                             #if self.debugLevel >=2:
-                               # self.debugLog(u'checking serial numbers')
+                               # self.logger.debug(u'checking serial numbers')
                                # self.errorLog(u'device serial:'+str(int(dev.states['serialNo'])))
                                # self.errorLog(u'panel serial no:'+str(devices['serial_num']))
                             #self.errorLog(u'Dev.states Producing type is' + str(type(dev.states['producing'])))
@@ -1129,13 +1338,13 @@ class Plugin(indigo.PluginBase):
                             if float(dev.states['serialNo']) == float(devices['serial_num']):
                                 if dev.states['producing']==True and devices['producing']==False:
                                     if self.debugLevel >= 1:
-                                        self.debugLog(u'Producing: States true, devices(producing) False: devices[producing] equals:'+str(devices['producing']))
+                                        self.logger.debug(u'Producing: States true, devices(producing) False: devices[producing] equals:'+str(devices['producing']))
                                     #  change only once
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
                                     dev.updateStateOnServer('watts', value=0, uiValue='--')
                                 if dev.states['producing'] == False and devices['producing'] == True:
                                     if self.debugLevel >= 1:
-                                        self.debugLog(u'States Producing False, and devices now shows True: device(producing):' + str(devices['producing']))
+                                        self.logger.debug(u'States Producing False, and devices now shows True: device(producing):' + str(devices['producing']))
                                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
                                     dev.updateStateOnServer('watts', value=dev.states['watts'], uiValue=str(dev.states['watts']))
 
@@ -1148,7 +1357,7 @@ class Plugin(indigo.PluginBase):
             except Exception as error:
                 self.errorLog('error within checkPanelInventory:'+str(error))
                 if self.debugLevel >= 2:
-                    self.debugLog(u"Device is offline. No data to return. ")
+                    self.logger.debug(u"Device is offline. No data to return. ")
                 dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                 dev.setErrorStateOnServer(u'Offline')
                 result = None
@@ -1160,7 +1369,7 @@ class Plugin(indigo.PluginBase):
     def getInventoryData(self, dev):
 
         if self.debugLevel >= 2:
-            self.debugLog(u"getInventoryData Enphase Panels method called.")
+            self.logger.debug(u"getInventoryData Enphase Panels method called.")
         try:
             headers = self.create_headers(dev)
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/inventory.json"
@@ -1168,14 +1377,14 @@ class Plugin(indigo.PluginBase):
             #r = self.session.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
             result = r.json()
             if self.debug:
-                self.debugLog(u"Inventory Result:" + str(result))
+                self.logger.debug(u"Inventory Result:" + str(result))
             return result
 
         except Exception as error:
 
             indigo.server.log(u"Error connecting to Device:" + dev.name)
             if self.debugLevel >= 2:
-                self.debugLog(u"Device is offline. No data to return. ")
+                self.logger.debug(u"Device is offline. No data to return. ")
             # dev.updateStateOnServer('deviceTimestamp', value=t.time())
             result = None
             self.WaitInterval = 60
@@ -1184,7 +1393,7 @@ class Plugin(indigo.PluginBase):
 
     def getthePanels(self, dev):
         if self.debugLevel >= 2:
-            self.debugLog(u"getthePanels Enphase Envoy method called.")
+            self.logger.debug(u"getthePanels Enphase Envoy method called.")
 
         if self.serial_number_last_six =="":
             if self.get_serial_number(dev):
@@ -1197,7 +1406,7 @@ class Plugin(indigo.PluginBase):
                 headers = self.create_headers( dev)
                 url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production/inverters"
                 if self.debugLevel >=2:
-                    self.debugLog(u"getthePanels: Password:"+str(self.serial_number_last_six))
+                    self.logger.debug(u"getthePanels: Password:"+str(self.serial_number_last_six))
                 if self.https_flag=="s":  # Using check using https in which case token.
                     r = self._get( url, timeout=35, headers=headers)
                     #r = self.session.get(url,headers=headers, timeout=35,verify=False, allow_redirects=True)
@@ -1207,7 +1416,7 @@ class Plugin(indigo.PluginBase):
                     #r = self.session.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
                 result = r.json()
                 if self.debugLevel >= 2:
-                    self.debugLog(f"Inverter Result:{result}")
+                    self.logger.debug(f"Inverter Result:{result}")
                 if "status" in result:
                     if result["status"] ==  401:
                         self.logger.info(f"Error getting Panel Data: Error : {result}")
@@ -1249,7 +1458,7 @@ class Plugin(indigo.PluginBase):
         corresponding value to each device state.
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"Saving Values method called.")
+            self.logger.debug(u"Saving Values method called.")
 
         try:
             dev.updateStateOnServer('wattHoursLifetime', value=int(results['wattHoursLifetime']))
@@ -1267,7 +1476,7 @@ class Plugin(indigo.PluginBase):
                 dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
 
             if self.debugLevel >= 1:
-                self.debugLog("State Image Selector:"+str(dev.displayStateImageSel))
+                self.logger.debug("State Image Selector:"+str(dev.displayStateImageSel))
 
         except Exception as error:
              if self.debugLevel >= 2:
@@ -1323,8 +1532,8 @@ class Plugin(indigo.PluginBase):
         #self.finalDict = testdata4
 
         if self.debugLevel >= 2:
-            self.debugLog(u"Saving Values method called.")
-            #self.debugLog(str(self.finalDict))
+            self.logger.debug(u"Saving Values method called.")
+            #self.logger.debug(str(self.finalDict))
 
         try:
             envoyType = dev.states['typeEnvoy']
@@ -1337,14 +1546,14 @@ class Plugin(indigo.PluginBase):
 
             if data is None:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"no data found.")
+                    self.logger.debug(u"no data found.")
                 return
 
             if "production" in data:
                 dev.updateStateOnServer('numberInverters', value=int(data['production'][0]['activeCount']))
             else:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"no Production result found.")
+                    self.logger.debug(u"no Production result found.")
                 dev.updateStateOnServer('numberInverters', value=0)
 
             if envoyType == "Metered":
@@ -1356,7 +1565,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('productionwhLifetime', value=int(data['production'][1]['whLifetime']))
                 else:
                     if self.debugLevel >= 2:
-                        self.debugLog(u"no Production 2 result found.")
+                        self.logger.debug(u"no Production 2 result found.")
                     dev.updateStateOnServer('productionWattsNow', value=0)
                     dev.updateStateOnServer('production7days',value=0)
                     dev.updateStateOnServer('productionWattsToday',value=0)
@@ -1388,7 +1597,7 @@ class Plugin(indigo.PluginBase):
                         dev.updateStateOnServer('netconsumptionwhLifetime',value=int(data['consumption'][1]['whLifetime']))
                     else:
                         if self.debugLevel >=2:
-                            self.debugLog(u'No netConsumption being reporting.....Calculating....')
+                            self.logger.debug(u'No netConsumption being reporting.....Calculating....')
                         # Calculate?
                         #
                         netConsumption = int(consumptionWatts) - int(productionWatts)
@@ -1417,7 +1626,7 @@ class Plugin(indigo.PluginBase):
                     # else:
                     #     self.logger.debug(str("API Consumption returned nothing."))
                     # if self.debugLevel >= 2:
-                    #     self.debugLog(u'No netConsumption being reporting.....Calculating....')
+                    #     self.logger.debug(u'No netConsumption being reporting.....Calculating....')
                     # # Calculate?
                     # #
                     # netConsumption = int(consumptionWatts) - int(productionWatts)
@@ -1425,7 +1634,7 @@ class Plugin(indigo.PluginBase):
 
             else:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"no Consumption result found.")
+                    self.logger.debug(u"no Consumption result found.")
 
             if envoyType == "Metered":
                 if "storage" in data:
@@ -1435,7 +1644,7 @@ class Plugin(indigo.PluginBase):
                     #dev.updateStateOnServer('storagePercentFull', value=int(self.finalDict['storage'][0]['percentFull']))
             else:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"no Storage result found.")
+                    self.logger.debug(u"no Storage result found.")
                 dev.updateStateOnServer('storageState', value='No Data')
 
             update_time = t.strftime("%m/%d/%Y at %H:%M")
@@ -1447,7 +1656,7 @@ class Plugin(indigo.PluginBase):
                 timeDifference = int(t.time() - t.mktime(reading_time.timetuple()))
                 dev.updateStateOnServer('secsSinceReading', value=timeDifference)
             if self.debugLevel >= 2:
-                self.debugLog(u"State Image Selector:"+str(dev.displayStateImageSel))
+                self.logger.debug(u"State Image Selector:"+str(dev.displayStateImageSel))
 
             ##
             self.setproductionMax(dev, productionWatts)
@@ -1459,23 +1668,23 @@ class Plugin(indigo.PluginBase):
                     #Generating more Power - and a change
                     # If Generating Power - but device believes importing - recent change unpdate to refleect
                     if self.debugLevel >= 2:
-                        self.debugLog(u'**CHANGED**: Exporting Power')
+                        self.logger.debug(u'**CHANGED**: Exporting Power')
 
                     dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
                     dev.updateStateOnServer('generatingPower', value=True)
                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
                     if self.debugLevel >= 2:
-                        self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+                        self.logger.debug("State Image Selector:" + str(dev.displayStateImageSel))
 
                 if productionWatts < consumptionWatts and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
                     #Must be opposite or and again a change only
                     if self.debugLevel >= 2:
-                        self.debugLog(u'**CHANGED**: Importing power')
+                        self.logger.debug(u'**CHANGED**: Importing power')
                     dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
                     dev.updateStateOnServer('generatingPower', value=False)
                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
                     if self.debugLevel >= 2:
-                        self.debugLog(u"State Image Selector:" + str(dev.displayStateImageSel))
+                        self.logger.debug(u"State Image Selector:" + str(dev.displayStateImageSel))
             elif envoyType == "Unmetered":
             # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
             # not consumption data appears possible
@@ -1487,7 +1696,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('powerStatus', value="producing", uiValue="Producing Energy")
                     dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
                     if self.debugLevel >= 2:
-                        self.debugLog("State Image Selector:" + str(dev.displayStateImageSel))
+                        self.logger.debug("State Image Selector:" + str(dev.displayStateImageSel))
                 elif productionWatts <= 0:
                     dev.updateStateOnServer('generatingPower', value=False, uiValue="No Power Production")
                     dev.updateStateOnServer('powerStatus', value="idle", uiValue="Not Producing Energy")
@@ -1495,7 +1704,7 @@ class Plugin(indigo.PluginBase):
 
             for costdev in indigo.devices.iter('self.EnphaseEnvoyCostDevice'):
                 if self.debugLevel >2:
-                    self.debugLog(u'Updating Cost Device')
+                    self.logger.debug(u'Updating Cost Device')
                 self.updateCostDevice(dev, costdev)
 
         except Exception as error:
@@ -1505,14 +1714,14 @@ class Plugin(indigo.PluginBase):
 
     def updateCostDevice(self, dev, costdev):
         if self.debugLevel>=2:
-            self.debugLog(u'updateCostDevice Run')
+            self.logger.debug(u'updateCostDevice Run')
         # get current Tarrif
         try:
             tariffkwhconsumption = float(costdev.pluginProps['envoyTariffkWhConsumption'])
             tariffkwhproduction = float(costdev.pluginProps['envoyTariffkWhProduction'])
         except Exception as error:
             if self.debugLevel>=2:
-                self.debugLog(u'error with Tarriff kwh,please update device settings. Defaulting to $1.0/kwh:' + str(error)   )
+                self.logger.debug(u'error with Tarriff kwh,please update device settings. Defaulting to $1.0/kwh:' + str(error)   )
             tariffkwhproduction = 1.0
             tariffkwhconsumption = 1.0
 
@@ -1578,7 +1787,7 @@ class Plugin(indigo.PluginBase):
 
     def setStatestonil(self, dev):
         if self.debugLevel >= 2:
-            self.debugLog(u'setStates to nil run')
+            self.logger.debug(u'setStates to nil run')
 
 
 
@@ -1589,12 +1798,12 @@ class Plugin(indigo.PluginBase):
 
     def generatepanels_thread(self, devId):
         if self.debugLevel >= 2:
-            self.debugLog(u'generate Panels run')
+            self.logger.debug(u'generate Panels run')
         try:
             #delete all panel devices first up
             dev = indigo.devices[devId]
             if self.debugLevel>=2:
-                self.debugLog(u'Folder ID'+str(dev.folderId))
+                self.logger.debug(u'Folder ID'+str(dev.folderId))
             self.thePanels = self.getthePanels(dev)
 
             if self.thePanels is not None:
@@ -1663,14 +1872,14 @@ class Plugin(indigo.PluginBase):
 
     def deletePanelDevices(self, valuesDict, typeId, devId):
         if self.debugLevel >= 2:
-            self.debugLog(u'Delete Panels run')
+            self.logger.debug(u'Delete Panels run')
 
         try:
             # delete all panel devices first up
             for dev in indigo.devices.iter('self.EnphasePanelDevice'):
                 indigo.device.delete(dev.id)
                 if self.debugLevel > 2:
-                    self.debugLog(u'Deleting Device' + str(dev.id))
+                    self.logger.debug(u'Deleting Device' + str(dev.id))
         except Exception as error:
             self.errorLog(u'error within delete panels' + str(error))
 
@@ -1680,7 +1889,7 @@ class Plugin(indigo.PluginBase):
         a plugin menu call.
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"refreshDataAction() method called.")
+            self.logger.debug(u"refreshDataAction() method called.")
         self.refreshData()
         return True
 
@@ -1690,13 +1899,13 @@ class Plugin(indigo.PluginBase):
         devices.
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"refreshData() method called.")
+            self.logger.debug(u"refreshData() method called.")
 
         try:
             # Check to see if there have been any devices created.
             if indigo.devices.iter(filter="self"):
                 if self.debugLevel >= 2:
-                    self.debugLog(u"Updating data...")
+                    self.logger.debug(u"Updating data...")
 
                 for dev in indigo.devices.iter(filter="self"):
                     self.refreshDataForDev(dev)
@@ -1714,7 +1923,7 @@ class Plugin(indigo.PluginBase):
     def checkEnvoyType(self,dev):
         self.logger.debug("Check Envoy Type Called...")
         if self.debugLevel >= 2:
-            self.debugLog(u"Type of Envoy Checking...: {0}".format(dev.name))
+            self.logger.debug(u"Type of Envoy Checking...: {0}".format(dev.name))
         data = self.getTheData(dev)
         if "production" in data:
             if len(data['production']) > 1 and int(data['production'][1]['whLifetime']) == 0:
@@ -1731,20 +1940,20 @@ class Plugin(indigo.PluginBase):
     def refreshDataForDev( self, dev):
         if dev.configured:
             if self.debugLevel >= 2:
-                self.debugLog(u"Found configured device: {0}".format(dev.name))
+                self.logger.debug(u"Found configured device: {0}".format(dev.name))
             if dev.enabled:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"   {0} is enabled.".format(dev.name))
+                    self.logger.debug(u"   {0} is enabled.".format(dev.name))
                 timeDifference = int(t.time() - t.mktime(dev.lastChanged.timetuple()))
                 if self.debugLevel >= 2:
-                    self.debugLog(dev.name + u": Time Since Device Update = " + str(timeDifference))
+                    self.logger.debug(dev.name + u": Time Since Device Update = " + str(timeDifference))
                     # self.errorLog(str(dev.lastChanged))
                 # Get the data.
                 # If device is offline wait for 60 seconds until rechecking
 
                 if dev.states['typeEnvoy']== "" or dev.states['typeEnvoy']=="unknown":
                     if self.debugLevel >= 2:
-                        self.debugLog(u"Type of Envoy Checking...: {0}".format(dev.name))
+                        self.logger.debug(u"Type of Envoy Checking...: {0}".format(dev.name))
                     data = self.getTheData(dev)
 
                     ## roque test data returns unmetered
@@ -1765,42 +1974,42 @@ class Plugin(indigo.PluginBase):
                     t.sleep(20)
                 if dev.states['deviceIsOnline'] == False and timeDifference >= 180:
                     if self.debugLevel >= 2:
-                        self.debugLog(u"Offline: Refreshing device: {0}".format(dev.name))
+                        self.logger.debug(u"Offline: Refreshing device: {0}".format(dev.name))
                     data = self.gettheDataChoice(dev)
 
                     self.parseStateValues(dev, data)
                 elif dev.states['deviceIsOnline']:
                     if self.debugLevel >= 2:
-                        self.debugLog(u"Online: Refreshing device: {0}".format(dev.name))
+                        self.logger.debug(u"Online: Refreshing device: {0}".format(dev.name))
                     data = self.gettheDataChoice(dev)
                     self.parseStateValues(dev, data)
             else:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"    Disabled: {0}".format(dev.name))
+                    self.logger.debug(u"    Disabled: {0}".format(dev.name))
 
     def legacyRefreshEnvoy(self,dev):
         if dev.configured:
             if self.debugLevel >= 2:
-                self.debugLog(u"Found configured device: {0}".format(dev.name))
+                self.logger.debug(u"Found configured device: {0}".format(dev.name))
 
             if dev.enabled:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"   {0} is enabled.".format(dev.name))
+                    self.logger.debug(u"   {0} is enabled.".format(dev.name))
                 timeDifference = int(t.time() - t.mktime(dev.lastChanged.timetuple()))
                 if self.debugLevel >= 2:
-                    self.debugLog(dev.name + u": Time Since Device Update = " + str(timeDifference))
+                    self.logger.debug(dev.name + u": Time Since Device Update = " + str(timeDifference))
                     # self.errorLog(str(dev.lastChanged))
                 # Get the data.
                 # If device is offline wait for 60 seconds until rechecking
                 if dev.states['deviceIsOnline'] == False and timeDifference >= 180:
                     if self.debugLevel >= 2:
-                        self.debugLog(u"Offline: Refreshing device: {0}".format(dev.name))
+                        self.logger.debug(u"Offline: Refreshing device: {0}".format(dev.name))
                     results = self.legacyGetTheData(dev)
                 # if device online normal time
 
                 if dev.states['deviceIsOnline']:
                     if self.debugLevel >= 2:
-                        self.debugLog(u"Online: Refreshing device: {0}".format(dev.name))
+                        self.logger.debug(u"Online: Refreshing device: {0}".format(dev.name))
                     results = self.legacyGetTheData(dev)
                     #ignore panel level data until later
                     #self.PanelDict = self.getthePanels(dev)
@@ -1809,7 +2018,7 @@ class Plugin(indigo.PluginBase):
                     self.legacyParseStateValues(dev, results)
             else:
                 if self.debugLevel >= 2:
-                    self.debugLog(u"    Disabled: {0}".format(dev.name))
+                    self.logger.debug(u"    Disabled: {0}".format(dev.name))
 
     def refreshDataForDevAction(self, valuesDict):
         """
@@ -1817,7 +2026,7 @@ class Plugin(indigo.PluginBase):
         a plugin menu call.
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"refreshDataForDevAction() method called.")
+            self.logger.debug(u"refreshDataForDevAction() method called.")
 
         dev = indigo.devices[valuesDict.deviceId]
 
@@ -1830,12 +2039,12 @@ class Plugin(indigo.PluginBase):
         Toggle debug on/off.
         """
         if self.debugLevel >= 2:
-            self.debugLog(u"toggleDebugEnabled() method called.")
+            self.logger.debug(u"toggleDebugEnabled() method called.")
         if not self.debug:
             self.debug = True
             self.pluginPrefs['showDebugInfo'] = True
             indigo.server.log(u"Debugging on.")
-            self.debugLog(u"Debug level: {0}".format(self.debugLevel))
+            self.logger.debug(u"Debug level: {0}".format(self.debugLevel))
 
         else:
             self.debug = False

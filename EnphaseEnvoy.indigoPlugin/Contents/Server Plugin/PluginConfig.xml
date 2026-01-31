@@ -46,14 +46,30 @@
         <Label/>
         <Description>Debug Plugin Updating</Description>
     </Field>
-  <Field id="showDebugLevel" type="menu" defaultValue="Low" tooltip="Controls the amount of debug information written to the log.">
-    <Label>Debug level:</Label>
-    <Description>Enable/Disable</Description>
-    <List>
-      <Option value="1">Low</Option>
-      <Option value="2">Medium</Option>
-      <Option value="3">High</Option>
-    </List>
-  </Field>
+    <Field id="showDebugLevel" type="menu" defaultValue="20">
+        <Label>Indigo Log Debug level:</Label>
+        <Description>Level of debug information in Indigo Event Log.</Description>
+        <List>
+            <Option value="5">Detailed Debugging Messages</Option>
+            <Option value="10">Debugging Messages</Option>
+            <Option value="20">Informational Messages</Option>
+            <Option value="30">Warning Messages</Option>
+            <Option value="40">Error Messages</Option>
+            <Option value="50">Critical Errors Only</Option>
+        </List>
+    </Field>
+
+    <Field id="showDebugFileLevel" type="menu" defaultValue="5">
+        <Label>File Debug level:</Label>
+        <Description>Level of debug information saved to plugin log file.</Description>
+        <List>
+            <Option value="5">Detailed Debugging Messages</Option>
+            <Option value="10">Debugging Messages</Option>
+            <Option value="20">Informational Messages</Option>
+            <Option value="30">Warning Messages</Option>
+            <Option value="40">Error Messages</Option>
+            <Option value="50">Critical Errors Only</Option>
+        </List>
+    </Field>
 
 </PluginConfig>

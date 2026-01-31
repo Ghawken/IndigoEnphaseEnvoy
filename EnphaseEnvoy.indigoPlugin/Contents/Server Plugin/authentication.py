@@ -1,450 +1,247 @@
+# authorisation.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# This file is part of Enphase-API <https://github.com/Matthew1471/Enphase-API>
-# Copyright (C) 2023 Matthew1471!
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License version 3 as
-# published by the Free Software Foundation.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 """
-Enphase-API Authentication Module
-This module provides classes and methods for interacting with the Enphase® authentication server.
-It supports maintaining an authenticated session and generating JWT tokens for use with an IQ
-Gateway.
+Indigo Enphase Token Authorisation (pyenphase-based)
+
+This module provides a small, sync-friendly wrapper around pyenphase EnvoyTokenAuth
+(the same token auth strategy Home Assistant uses).
+
+You get:
+  - get_token(): returns a valid token; refreshes when near expiry or missing
+  - refresh_token(): force refresh from cloud and validate token against local Envoy
+
+Notes:
+  - Requires `pyenphase` and `aiohttp` in your Indigo plugin environment.
+  - Cloud token retrieval may fail if Enlighten MFA is enabled.
 """
 
-# Used to generate an OAuth 2.0 Proof Key for Code Exchange (PKCE) code verifier.
-import base64
-import hashlib
-import random
-import string
+from __future__ import annotations
+from datetime import datetime
+import asyncio
+import logging
+import time
+from dataclasses import dataclass
+from typing import Optional
 
-# We extract the code from the returned OAuth 2.0 URL.
-import urllib.parse
-
-# We can check JWT claims/expiration first before making a request
-# ("pip install pyjwt" if not already installed).
-import jwt
-
-# Third party library for making HTTP(S) requests;
-# "pip install requests" if getting import errors.
-import requests
-
-# Remove urllib3 added user-agent (https://github.com/psf/requests/issues/5671)
-import urllib3
+import jwt  # PyJWT
 
 
-class Authentication:
+import aiohttp
+from pyenphase.auth import EnvoyTokenAuth
+from pyenphase.ssl import NO_VERIFY_SSL_CONTEXT
+
+
+@dataclass
+class TokenState:
+    token: str
+    exp_ts: int  # epoch seconds (0 if unknown)
+    fetched_ts: int  # epoch seconds
+
+
+class EnphaseTokenManager:
     """
-    A class to talk to Enphase®'s Cloud based Authentication Server, Entrez (French for "Access").
-    This server also supports granting tokens for local access to an IQ Gateway.
+    Sync wrapper for pyenphase EnvoyTokenAuth for Indigo.
+
+    Typical usage from plugin.py:
+        tm = EnphaseTokenManager(
+            host=envoy_ip,
+            cloud_username=user,
+            cloud_password=pw,
+            envoy_serial=serial,
+            token=saved_token,
+            logger=self.logger,
+        )
+        token = tm.get_token()
+        if tm.did_refresh:
+            # persist tm.token somewhere (pluginPrefs / deviceProps)
     """
 
-    # Authentication host, Entrez (French for "Access").
-    AUTHENTICATION_HOST = 'https://entrez.enphaseenergy.com'
+    def __init__(
+        self,
+        host: str,
+        cloud_username: Optional[str] = None,
+        cloud_password: Optional[str] = None,
+        envoy_serial: Optional[str] = None,
+        token: Optional[str] = None,
+        logger: Optional[logging.Logger] = None,
+        refresh_margin_seconds: int = 7 * 24 * 3600,  # refresh if within 7 days of expiry
+        timeout_seconds: int = 60,
+    ) -> None:
+        self.logger = logger or logging.getLogger(__name__)
+        self.host = host
+        self.cloud_username = cloud_username
+        self.cloud_password = cloud_password
+        self.envoy_serial = envoy_serial
+        self.refresh_margin_seconds = int(refresh_margin_seconds)
+        self.timeout_seconds = int(timeout_seconds)
 
-    # This prevents the requests + urllib3 module from creating its own user-agent.
-    HEADERS = {'User-Agent': urllib3.util.SKIP_HEADER, 'Accept': 'application/json'}
+        self.did_refresh: bool = False
+        self.last_error: Optional[str] = None
 
-    # This sets a 5 minute connect and read timeout.
-    TIMEOUT = 300
+        if EnvoyTokenAuth is None or aiohttp is None:
+            raise RuntimeError(
+                f"pyenphase/aiohttp not available: {_IMPORT_ERROR!r}. "
+                "Install pyenphase + aiohttp into the Indigo plugin environment."
+            )
 
-    # Holds the session cookie which contains the session token.
-    session_cookies = None
-
-    @staticmethod
-    def _extract_token_from_response(response):
-        """
-        Extract the access token from the HTML response of the Entrez authentication server.
-
-        This internal method searches for the access token within the HTML response
-        using predefined markers. If the markers change, the method may need to be updated.
-
-        Args:
-            response (str): The HTML response from the Entrez authentication server.
-
-        Returns:
-            str: The extracted access token.
-
-        Raises:
-            ValueError: If the access token cannot be found in the response.
-                        This may indicate changes in the response structure.
-        """
-
-        # The text that indicates the beginning of a token, if this changes a lot we may have to
-        # turn this into a regular expression.
-        start_needle = '<textarea name="accessToken" id="JWTToken" cols="30" rows="10" >'
-
-        # Look for the start token text.
-        start_position = response.find(start_needle)
-
-        # Check the response contains the expected start of a token result.
-        if start_position != -1:
-            # Skip past the start_needle.
-            start_position += len(start_needle)
-
-            # Look for the end of the token text.
-            end_position = response.find('</textarea>', start_position)
-
-            # Check the end_position can be found.
-            if end_position != -1:
-                # The token can be returned.
-                return response[start_position:end_position]
-
-            # The token cannot be returned.
-            raise ValueError('Unable to find the end of the token in the Authentication Server repsonse (the response page may have changed).')
-
-        # The token cannot be returned.
-        raise ValueError('Unable to find access token in Authentication Server response (the response page may have changed).')
-
-    def authenticate(self, username, password):
-        """
-        Authenticate with Entrez (with a username and password) and maintains a session.
-
-        Args:
-            username (str): The user's Enphase® username for authentication.
-            password (str): The user's Enphase® password for authentication.
-
-        Returns:
-            bool: True if authentication is successful, False otherwise.
-        """
-
-        # Build the login request payload.
-        data = {'username':username, 'password':password}
-
-        # Send the login request.
-        response = requests.post(
-            url=f'{Authentication.AUTHENTICATION_HOST}/login',
-            headers=Authentication.HEADERS,
-            data=data,
-            timeout=Authentication.TIMEOUT
+        # pyenphase token auth object (async internally)
+        self._auth = EnvoyTokenAuth(
+            host=self.host,
+            cloud_username=self.cloud_username,
+            cloud_password=self.cloud_password,
+            envoy_serial=self.envoy_serial,
+            token=token,
         )
 
-        # There's only 1 cookie that is important to maintain a session once we are authenticated.
-        # SESSION - This links our future requests to our existing login session on this server.
-        self.session_cookies = {'SESSION': response.cookies.get('SESSION')}
+        # Local cached state (what plugin should persist)
+        self._state: Optional[TokenState] = None
+        if token:
+            self._state = TokenState(token=token, exp_ts=self._jwt_exp_ts(token), fetched_ts=int(time.time()))
 
-        # Return a true/false on whether login was successful.
-        return response.status_code == 200
+    # -------------------------
+    # Public API
+    # -------------------------
 
-    @staticmethod
-    def authenticate_oauth(username, password, gateway_serial_number='un-commissioned'):
+    @property
+    def token(self) -> Optional[str]:
+        return self._state.token if self._state else None
+
+    @property
+    def token_exp_ts(self) -> int:
+        return self._state.exp_ts if self._state else 0
+
+    def get_token(self, force_refresh: bool = False) -> str:
         """
-        Authenticate with Entrez (with a username and password) using OAuth 2.0.
-        This is currently using the "Authorization Code Flow with Proof Key for Code Exchange
-        (PKCE)" grant.
-
-        Args:
-            username (str): The user's Enphase® username for authentication.
-            password (str): The user's Enphase® password for authentication.
-            gateway_serial_number (str, optional): The serial number of the IQ Gateway.
-                Defaults to 'un-commissioned'.
-
-        Returns:
-            tuple: A tuple containing the authorisation code and code verifier.
+        Return a valid token. Refreshes if:
+          - force_refresh=True
+          - no token present
+          - token is expired or near expiry (within refresh_margin_seconds)
         """
+        self.did_refresh = False
+        self.last_error = None
 
-        # OAuth 2.0 Proof Key for Code Exchange (PKCE) in case response is intercepted.
-        uri_unreserved_characters = string.ascii_letters + string.digits + '-._~'
-        code_verifier = ''.join(random.choices(uri_unreserved_characters, k=40))
+        if force_refresh:
+            self.logger.debug("get_token(force_refresh=True) -> refresh_token()")
+            return self.refresh_token()
 
-        # This is sent in the initial request hashed
-        # (before the auth server knows the plaintext to prove the request came from us).
-        sha256_digest = hashlib.sha256(code_verifier.encode('ascii')).digest()
-        code_challenge = base64.urlsafe_b64encode(sha256_digest).decode('ascii').rstrip('=')
+        # If we have a token and it is not near expiry, return it.
+        if self._state and self._state.token:
+            if self._token_is_valid_enough(self._state.exp_ts):
+                self.logger.debug(
+                    "Using cached token (exp_ts=%s, now=%s)",
+                    self._state.exp_ts,
+                    int(time.time()),
+                )
+                return self._state.token
+            self.logger.info("Token is expired/near expiry -> attempting refresh")
 
-        # Build the login and authorisation code request (with PKCE) payload.
-        data = {
-            'username': username,
-            'password': password,
-            'codeChallenge': code_challenge,
-            'redirectUri': 'https://envoy.local/auth/callback',
-            'client': 'envoy-ui',
-            'clientId': 'envoy-ui-client',
-            'authFlow': 'oauth',
-            'serialNum': gateway_serial_number
-        }
+        # Otherwise, attempt refresh
+        return self.refresh_token()
 
-        # Send the login request.
-        response = requests.post(
-            url=f'{Authentication.AUTHENTICATION_HOST}/login',
-            headers=Authentication.HEADERS,
-            data=data,
-            timeout=Authentication.TIMEOUT,
-            allow_redirects=False
-        )
-
-        # If succesful the authentication server will recommend a redirect to the redirectUri.
-        if response.status_code == 302 and 'location' in response.headers:
-            # What is the URL it is redirecting to?
-            redirect = response.headers['location']
-
-            # Split out the component parts of the URL.
-            parsed_url = urllib.parse.urlparse(redirect)
-
-            # Parse the query string components.
-            query_params = urllib.parse.parse_qs(parsed_url.query)
-
-            # Was there a "code" query string key?
-            if 'code' in query_params:
-                # Return the code and the code_verifier.
-                return query_params.get('code')[0], code_verifier
-
-        # If we got to this line then an error occurred.
-        raise ValueError('Unable to authenticate using OAuth 2.0.')
-
-    def get_site(self, site_name):
+    def refresh_token(self) -> str:
         """
-        Get site details (site ID number, full site name and associated IQ Gateway serial numbers)
-        from a partial site name.
-
-        Args:
-            site_name (str): The partial site name.
-
-        Returns:
-            dict: The JSON response containing the site details.
+        Force refresh the token from cloud and validate it against local Envoy.
+        Raises on failure.
         """
+        self.did_refresh = False
+        self.last_error = None
 
-        # Send the site details request.
-        response = requests.get(
-            url=f'{Authentication.AUTHENTICATION_HOST}/site/{requests.utils.quote(site_name, safe="")}',
-            headers=Authentication.HEADERS,
-            cookies=self.session_cookies,
-            timeout=Authentication.TIMEOUT
-        )
-
-        # Return the response.
-        return response.json()
-
-    def get_token_for_commissioned_gateway(self, gateway_serial_number):
-        """
-        Get a JWT token for a specific IQ Gateway which has been commissioned.
-
-        Args:
-            gateway_serial_number (str): The serial number of a commissioned IQ Gateway.
-
-        Returns:
-            str: The JWT token.
-        """
-
-        # Build the request payload.
-        # The official form sends additional keys but they are not required.
-        data = {'serialNum': gateway_serial_number}
-
-        # Send the form request for a token.
-        response = requests.post(
-            url=f'{Authentication.AUTHENTICATION_HOST}/entrez_tokens',
-            headers=Authentication.HEADERS,
-            cookies=self.session_cookies,
-            data=data,
-            timeout=Authentication.TIMEOUT
-        )
-
-        # Return just the token.
-        return self._extract_token_from_response(response.text)
-
-    def get_token_for_uncommissioned_gateway(self):
-        """
-        Get a JWT token for all IQ Gateways which have yet to be commissioned.
-
-        Returns:
-            str: The JWT token.
-        """
-
-        # Build the request payload.
-        # The official form sends additional keys but they are not required.
-        data = {'uncommissioned': 'true'}
-
-        # Send the form request for a token.
-        response = requests.post(
-            url=f'{Authentication.AUTHENTICATION_HOST}/entrez_tokens',
-            headers=Authentication.HEADERS,
-            cookies=self.session_cookies,
-            data=data,
-            timeout=Authentication.TIMEOUT
-        )
-
-        # Return just the token.
-        return self._extract_token_from_response(response.text)
-
-    def get_token_from_enlighten_session_id(self, enlighten_session_id, gateway_serial_number, username):
-        """
-        Get a JWT token for a specific IQ Gateway using an Enlighten session ID.
-
-        Args:
-            enlighten_session_id (str): The Enlighten session ID.
-            gateway_serial_number (str): The serial number of the IQ Gateway.
-            username (str): The Enphase® username associated with the session.
-
-        Returns:
-            bytes: The token content.
-        """
-
-        # Build the request payload.
-        json = {
-            'session_id': enlighten_session_id,
-            'serial_num': gateway_serial_number,
-            'username': username
-        }
-
-        # This is probably also used internally by the Enlighten website to authorise sessions
-        # via Entrez.
-        response = requests.post(
-            url=f'{Authentication.AUTHENTICATION_HOST}/tokens',
-            headers=Authentication.HEADERS,
-            cookies=self.session_cookies,
-            json=json,
-            timeout=Authentication.TIMEOUT
-        )
-
-        # Return just the token.
-        return response.content
-
-    @staticmethod
-    def get_token_from_oauth(code, code_verifier):
-        """
-        Perform an OAuth 2.0 authorisation code exchange for a token (with PKCE).
-        This method does not require an open session on the authentication server.
-
-        Args:
-            code (str): The authorisation code.
-            code_verifier (str): The PKCE code verifier.
-
-        Returns:
-            dict: The JSON response containing the token information.
-        """
-
-        # Build the exchange authorisation code for a token (with PKCE) request payload.
-        data = {
-            'code': code,
-            'code_verifier': code_verifier,
-            'redirect_uri': 'https://envoy.local/auth/callback',
-            'client_id': 'envoy-ui-1',
-            'grant_type': 'authorization_code'
-        }
-
-        # This is used internally by the IQ Gateway to exchange an authorisation code for a token.
-        response = requests.post(
-            url=f'{Authentication.AUTHENTICATION_HOST}/oauth/token',
-            headers=Authentication.HEADERS,
-            data=data,
-            timeout=Authentication.TIMEOUT
-        )
-
-        # Return the JSON response.
-        return response.json()
-
-    @staticmethod
-    def check_token_valid(token, gateway_serial_number=None, verify_signature=False):
-        """
-        This performs JWT token validation to confirm whether a token would likely be valid for a
-        local API authentication call.
-
-        Args:
-            token (str):
-                The JWT token.
-            gateway_serial_number (str, optional):
-                The serial number of the IQ Gateway. Defaults to None.
-            verify_signature (bool, optional):
-                Whether to verify the token signature. Defaults to False.
-
-        Returns:
-            bool: True if the token is valid, False otherwise.
-        """
-
-        # An installer is always allowed to access any uncommissioned IQ Gateway serial number
-        # (for a shorter time however).
-        if gateway_serial_number:
-            calculated_audience = [gateway_serial_number, 'un-commissioned']
-        else:
-            calculated_audience = ['un-commissioned']
-
-        # We require "aud", "iss", "enphaseUser", "exp", "iat", "jti" and "username" values.
-        require = ['aud', 'iss', 'enphaseUser', 'exp', 'iat', 'jti', 'username']
+        if not self.cloud_username or not self.cloud_password or not self.envoy_serial:
+            raise ValueError(
+                "Cannot refresh token without cloud_username, cloud_password, and envoy_serial. "
+                "Provide those or supply a manual token."
+            )
 
         try:
-            # PyJWT requires "cryptography" to be able to support ES256.
-            if verify_signature:
-                # The Entrez production JWT public key.
-                public_key = (
-                    '-----BEGIN PUBLIC KEY-----\n'
-                    'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6PhAU3Mk4W7Ara5hCWPHDtv8LY0CtBwEVj4k4Tu8KRBMOhbTcHHnxYJ3UKppIKyraB2GFUmOhGP9O2jmcb4UAw==\n'
-                    '-----END PUBLIC KEY-----'
-                )
+            token = self._run_async(self._async_refresh_and_validate())
+            self.did_refresh = True
+            return token
+        except Exception as e:
+            msg = str(e)
+            self.last_error = msg
+            # A common real-world cause: MFA enabled → cloud login fails
+            self.logger.error(
+                "Token refresh failed. If your Enlighten account has MFA enabled, disable it or use a manually generated token. Error: %s",
+                msg,
+            )
+            raise
 
-                # Is the token still valid?
-                jwt.decode(
-                    jwt=token,
-                    key=public_key,
-                    algorithms='ES256',
-                    options={'require':require},
-                    audience=calculated_audience,
-                    issuer='Entrez'
-                )
-            else:
-                # While the signature itself is not verified, we enforce required fields and
-                # validate "aud", "iss", "exp" and "iat" values.
-                options = {
-                    'verify_signature':False,
-                    'require':require,
-                    'verify_aud':True,
-                    'verify_iss':True,
-                    'verify_exp':True,
-                    'verify_iat':True
-                }
+    # -------------------------
+    # Internals
+    # -------------------------
 
-                # Is the token still valid?
-                jwt.decode(
-                    jwt=token,
-                    options=options,
-                    audience=calculated_audience,
-                    issuer='Entrez'
-                )
-
-            # If we got to this line then no exceptions were generated by the above.
-            return True
-
-        # We mask the specific reason and just ultimately inform the user that the token is invalid.
-        except (
-            jwt.exceptions.InvalidTokenError,
-            jwt.exceptions.DecodeError,
-            jwt.exceptions.InvalidSignatureError,
-            jwt.exceptions.ExpiredSignatureError,
-            jwt.exceptions.InvalidAudienceError,
-            jwt.exceptions.InvalidIssuerError,
-            jwt.exceptions.InvalidIssuedAtError,
-            jwt.exceptions.InvalidAlgorithmError,
-            jwt.exceptions.MissingRequiredClaimError
-        ):
-
-            # The token is invalid.
+    def _token_is_valid_enough(self, exp_ts: int) -> bool:
+        """True if token exists and not expiring within the refresh margin."""
+        if not exp_ts:
+            # If we can't parse exp, treat as unknown and force refresh soon
             return False
+        now = int(time.time())
+        if exp_ts <= now:
+            return False
+        # Refresh when within margin
+        return exp_ts > (now + self.refresh_margin_seconds)
 
-    def logout(self):
+    @staticmethod
+    def _jwt_exp_ts(token: str) -> int:
         """
-        Close the current session to the authentication server.
-
-        Returns:
-            bool: True if logout is successful, False otherwise.
+        Decode JWT 'exp' without verifying signature.
+        Returns 0 if missing/unparseable.
         """
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            exp = payload.get("exp")
+            return int(exp) if exp is not None else 0
+        except Exception:
+            return 0
 
-        # Send the logout request.
-        response = requests.post(
-            url=f'{Authentication.AUTHENTICATION_HOST}/logout',
-            headers=Authentication.HEADERS,
-            cookies=self.session_cookies,
-            timeout=Authentication.TIMEOUT
-        )
+    def _run_async(self, coro):
+        """
+        Run an async coroutine from sync Indigo code.
+        Uses asyncio.run when possible; falls back to a private loop if already running.
+        """
+        try:
+            return asyncio.run(coro)
+        except RuntimeError as e:
+            # Happens if called from within an existing running loop (rare in Indigo, but safe)
+            if "asyncio.run()" in str(e) or "running event loop" in str(e):
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(coro)
+                finally:
+                    loop.close()
+            raise
 
-        # Just return whether this call was successful or not.
-        return response.status_code == 200
+    async def _async_refresh_and_validate(self) -> str:
+        """
+        Use pyenphase EnvoyTokenAuth to:
+          1) refresh token from cloud
+          2) setup() to validate against local Envoy
+        """
+        assert aiohttp is not None
+        assert NO_VERIFY_SSL_CONTEXT is not None
+
+        connector = aiohttp.TCPConnector(ssl=NO_VERIFY_SSL_CONTEXT)
+        timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as client:
+            # Force cloud refresh first
+            self.logger.debug("Calling pyenphase EnvoyTokenAuth.refresh()")
+            await self._auth.refresh()
+
+            # Validate/setup against local Envoy (and ensure headers/cookies correct)
+            self.logger.debug("Calling pyenphase EnvoyTokenAuth.setup() for local validation")
+            await self._auth.setup(client)
+
+        # Pull token from pyenphase object
+        new_token = getattr(self._auth, "token", None)
+        if not new_token:
+            raise ValueError("pyenphase EnvoyTokenAuth did not provide a token after refresh/setup.")
+
+        exp_ts = self._jwt_exp_ts(new_token)
+        self._state = TokenState(token=new_token, exp_ts=exp_ts, fetched_ts=int(time.time()))
+
+        self.logger.info("Successfully obtained new token . Expires: %s — will auto-refresh before expiry.",
+                          datetime.fromtimestamp(exp_ts).isoformat() if exp_ts else "<unknown>")
+        return new_token

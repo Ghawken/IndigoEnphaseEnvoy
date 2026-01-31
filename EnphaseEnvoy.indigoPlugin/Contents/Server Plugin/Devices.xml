@@ -41,17 +41,17 @@
           Create token here: https://entrez.enphaseenergy.com/</Label>
       </Field>
          <Field id="sepaasdaa2" type="separator"/>
-            <Field id="generate_token" type="checkbox" defaultValue="false" tooltip="Use Token to access" hidden="true" alwaysUseInDialogHeightCalc="true">
+            <Field id="generate_token" type="checkbox" defaultValue="false" tooltip="Use Token to access"  alwaysUseInDialogHeightCalc="true">
       <Label>(or) Generate Token:</Label>
       <Description>Required for Firmware >=7</Description>
           </Field>
-        <Field id="enphase_user" type="textfield" defaultValue="" visibleBindingId="generate_token" hidden="true" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+        <Field id="enphase_user" type="textfield" defaultValue="" visibleBindingId="generate_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
         <Label>Enphase Login:</Label>
       </Field>
-        <Field id="enphase_password" type="textfield" defaultValue="" visibleBindingId="generate_token" hidden="true" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+        <Field id="enphase_password" type="textfield" defaultValue="" visibleBindingId="generate_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
         <Label>Enphase Password:</Label>
       </Field>
-      <Field id="exampleabca3" type="label" fontSize="small" fontColor="black" alignText="right" hidden="true" visibleBindingId="use_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
+      <Field id="exampleabca3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true"  alwaysUseInDialogHeightCalc="true">
         <Label>Some form of Token access needed for firmware >7</Label>
       </Field>
 
@@ -261,7 +261,21 @@
         <TriggerLabel>Storage percent Full</TriggerLabel>
         <ControlPageLabel>Storage percent Full</ControlPageLabel>
       </State>
-
+      <State id="serial_number">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Serial Number</TriggerLabel>
+        <ControlPageLabel>Serial Number</ControlPageLabel>
+      </State>
+              <State id="firmware_version">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Firmware Version</TriggerLabel>
+        <ControlPageLabel>Firmware Version</ControlPageLabel>
+      </State>
+                      <State id="token_expires">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Token Expires</TriggerLabel>
+        <ControlPageLabel>Token Expires</ControlPageLabel>
+      </State>
 
 
     </States>
