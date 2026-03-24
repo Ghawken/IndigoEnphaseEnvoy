@@ -59,6 +59,14 @@ WEEK_PRODUCTION_REGEX = \
 LIFE_PRODUCTION_REGEX = \
     r'<td>Since Installation</td>\s+<td>\s*(\d+|\d+\.\d+)\s*(Wh|kWh|MWh)</td>'
 
+# Enphase Envoy power production control constants.
+# Endpoint and payload structure from the vincentwolsink HA installer integration
+# Envoy power production control endpoint and payload values.
+# powerForcedOff: 0 = production ON, 1 = production OFF.
+ENVOY_POWER_MODE_PATH = "/ivp/mod/603980032/mode/power"
+POWER_FORCED_OFF_FALSE = 0  # production enabled
+POWER_FORCED_OFF_TRUE = 1   # production disabled
+
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -519,7 +527,121 @@ class Plugin(indigo.PluginBase):
         except Exception:
             self.logger.debug("Exception getting token:", exc_info=True)
             return None
+###
+##
+    # ── Power Production Control ────────────────────────────────────────
 
+    def enablePowerProduction(self, pluginAction):
+        """Action callback: enable power production for the selected device."""
+        dev = indigo.devices[pluginAction.deviceId]
+        self._setPowerProduction(dev, enable=True)
+
+    def disablePowerProduction(self, pluginAction):
+        """Action callback: disable power production for the selected device."""
+        dev = indigo.devices[pluginAction.deviceId]
+        self._setPowerProduction(dev, enable=False)
+
+    def _pollPowerProductionStatus(self, dev):
+        """
+        Poll the Envoy power production endpoint to keep the
+        powerProductionEnabled state in sync.
+
+        Reads 'powerForcedOff' from /ivp/mod/603980032/mode/power.
+        Only runs when an auth token is available (firmware 7.x+).
+        """
+        headers = self.create_headers(dev)
+        if not headers:
+            return
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            return
+
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_POWER_MODE_PATH}"
+
+        try:
+            r = self._get(url, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                power_forced_off = data.get('powerForcedOff')
+                if power_forced_off is not None:
+                    production_enabled = (power_forced_off == POWER_FORCED_OFF_FALSE)
+                    dev.updateStateOnServer('powerProductionEnabled', value=production_enabled)
+                    if self.debugLevel >= 2:
+                        self.logger.debug(f"Power production status polled: enabled={production_enabled}")
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Could not poll power production status. HTTP {r.status_code}")
+        except Exception as err:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Error polling power production status: {err}")
+
+    def _setPowerProduction(self, dev, enable):
+        """
+        Enable or disable solar power production via the Envoy local API.
+
+        Uses PUT /ivp/mod/603980032/mode/power.
+        Requires an installer-level JWT token (firmware 7.x+) configured
+        via the existing auth_token device property.
+        """
+        headers = self.create_headers(dev)
+        if not headers:
+            self.logger.error(
+                f"No auth token configured for device: {dev.name}. "
+                f"An installer-level JWT token is required for power production control."
+            )
+            return False
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            self.logger.error(f"No IP address configured for device: {dev.name}")
+            return False
+
+        power_forced_off = POWER_FORCED_OFF_FALSE if enable else POWER_FORCED_OFF_TRUE
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_POWER_MODE_PATH}"
+        # The Envoy expects a JSON array payload: 'arr' holds one element per
+        # inverter group, and 'length' is the count of elements.  A single-element
+        # array controls the whole site.  0 = production on, 1 = production off.
+        payload = json.dumps({"length": 1, "arr": [power_forced_off]})
+        headers['Content-Type'] = 'application/json'
+
+        action_label = "Enabling" if enable else "Disabling"
+
+        try:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"{action_label} power production for: {dev.name}")
+                self.logger.debug(f"PUT {url}")
+
+            host = urlsplit(url).netloc
+            session = self.session_cache[host]
+            r = session.put(url, data=payload, headers=headers,
+                            timeout=self.prefServerTimeout, allow_redirects=True)
+
+            if r.status_code == 200:
+                indigo.server.log(
+                    f"Power production {'enabled' if enable else 'disabled'} for {dev.name}"
+                )
+                dev.updateStateOnServer('powerProductionEnabled', value=enable)
+                return True
+            else:
+                self.logger.error(
+                    f"Failed to {action_label.lower()} power production for {dev.name}. "
+                    f"HTTP {r.status_code}: {r.text}"
+                )
+                return False
+
+        except requests.exceptions.Timeout:
+            self.logger.error(f"Timeout {action_label.lower()} power production for: {dev.name}")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.error(f"Connection error {action_label.lower()} power production for: {dev.name}")
+            return False
+        except Exception as err:
+            self.logger.error(f"Error {action_label.lower()} power production for {dev.name}: {err}")
+            return False
+
+
+###########
     def _get_enphase_token_expiry(self, token):
         try:
             payload = jwt.decode(token, options={"verify_signature": False})
@@ -1995,6 +2117,7 @@ class Plugin(indigo.PluginBase):
                         self.logger.debug(u"Online: Refreshing device: {0}".format(dev.name))
                     data = self.gettheDataChoice(dev)
                     self.parseStateValues(dev, data)
+                    self._pollPowerProductionStatus(dev)
             else:
                 if self.debugLevel >= 2:
                     self.logger.debug(u"    Disabled: {0}".format(dev.name))

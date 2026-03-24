@@ -34,7 +34,7 @@
       </Field>
 
         <Field id="auth_token" type="textfield" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
-        <Label>Authenication Token:</Label>
+        <Label>Authentication Token:</Label>
       </Field>
       <Field id="exampleaa3" type="label" fontSize="small" fontColor="black" alignText="right" visibleBindingId="use_token" visibleBindingValue="true" alwaysUseInDialogHeightCalc="true">
         <Label>Some form Token access needed for firmware >=7
@@ -275,6 +275,11 @@
         <ValueType>String</ValueType>
         <TriggerLabel>Token Expires</TriggerLabel>
         <ControlPageLabel>Token Expires</ControlPageLabel>
+      </State>
+      <State id="powerProductionEnabled">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Power Production Enabled</TriggerLabel>
+        <ControlPageLabel>Power Production Enabled</ControlPageLabel>
       </State>
 
 
