@@ -1551,9 +1551,11 @@ class Plugin(indigo.PluginBase):
                     if consumptionMeter is None:  # prefer total-consumption
                         consumptionMeter = meter
 
-            # Fallback: if measurementType not present, use /ivp/meters to identify
-            # For now, use positional: first meter = production, second = consumption
+            # Fallback: if measurementType not present, try matching by /ivp/meters config.
+            # As last resort, use positional: first meter = production, second = consumption.
+            # This ordering is standard for Envoy firmware but may vary in rare setups.
             if productionMeter is None and consumptionMeter is None and len(metersData) >= 1:
+                self.logger.debug("Meters readings: measurementType not found, falling back to positional identification")
                 productionMeter = metersData[0]
                 if len(metersData) >= 2:
                     consumptionMeter = metersData[1]
@@ -1608,6 +1610,8 @@ class Plugin(indigo.PluginBase):
                 break
             phase = phaseLabels[idx]
             try:
+                # activePower is the standard field name in newer firmware;
+                # older firmware uses instantaneousDemand for the same value
                 activePower = round(channel.get('activePower', channel.get('instantaneousDemand', 0)), 1)
                 voltage = round(channel.get('voltage', 0), 1)
                 current = round(channel.get('current', 0), 3)
@@ -1620,7 +1624,9 @@ class Plugin(indigo.PluginBase):
                 elif meterType == 'consumption':
                     dev.updateStateOnServer(f'consumptionWatts{phase}', value=activePower)
 
-                # Voltage/current/apparent power - use production meter for these shared values
+                # Per-phase voltage/current/frequency are grid measurements shared across
+                # meters. We use the production meter values since both meters measure
+                # the same grid phases; this avoids duplicate updates.
                 if meterType == 'production':
                     dev.updateStateOnServer(f'voltage{phase}', value=voltage)
                     dev.updateStateOnServer(f'current{phase}', value=current)
