@@ -282,6 +282,171 @@
         <ControlPageLabel>Power Production Enabled</ControlPageLabel>
       </State>
 
+      <!-- Per-Phase Production (from /ivp/meters/readings - production meter channels) -->
+      <State id="productionWattsL1">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Watts L1</TriggerLabel>
+        <ControlPageLabel>Production Watts L1</ControlPageLabel>
+      </State>
+      <State id="productionWattsL2">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Watts L2</TriggerLabel>
+        <ControlPageLabel>Production Watts L2</ControlPageLabel>
+      </State>
+      <State id="productionWattsL3">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Watts L3</TriggerLabel>
+        <ControlPageLabel>Production Watts L3</ControlPageLabel>
+      </State>
+
+      <!-- Per-Phase Consumption (from /ivp/meters/readings - consumption meter channels) -->
+      <State id="consumptionWattsL1">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Watts L1</TriggerLabel>
+        <ControlPageLabel>Consumption Watts L1</ControlPageLabel>
+      </State>
+      <State id="consumptionWattsL2">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Watts L2</TriggerLabel>
+        <ControlPageLabel>Consumption Watts L2</ControlPageLabel>
+      </State>
+      <State id="consumptionWattsL3">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Watts L3</TriggerLabel>
+        <ControlPageLabel>Consumption Watts L3</ControlPageLabel>
+      </State>
+
+      <!-- Per-Phase Voltage (from /ivp/meters/readings channels) -->
+      <State id="voltageL1">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Voltage L1</TriggerLabel>
+        <ControlPageLabel>Voltage L1</ControlPageLabel>
+      </State>
+      <State id="voltageL2">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Voltage L2</TriggerLabel>
+        <ControlPageLabel>Voltage L2</ControlPageLabel>
+      </State>
+      <State id="voltageL3">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Voltage L3</TriggerLabel>
+        <ControlPageLabel>Voltage L3</ControlPageLabel>
+      </State>
+
+      <!-- Per-Phase Current (from /ivp/meters/readings channels) -->
+      <State id="currentL1">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Current L1 (A)</TriggerLabel>
+        <ControlPageLabel>Current L1 (A)</ControlPageLabel>
+      </State>
+      <State id="currentL2">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Current L2 (A)</TriggerLabel>
+        <ControlPageLabel>Current L2 (A)</ControlPageLabel>
+      </State>
+      <State id="currentL3">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Current L3 (A)</TriggerLabel>
+        <ControlPageLabel>Current L3 (A)</ControlPageLabel>
+      </State>
+
+      <!-- Per-Phase Apparent Power -->
+      <State id="apparentPowerL1">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Apparent Power L1 (VA)</TriggerLabel>
+        <ControlPageLabel>Apparent Power L1 (VA)</ControlPageLabel>
+      </State>
+      <State id="apparentPowerL2">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Apparent Power L2 (VA)</TriggerLabel>
+        <ControlPageLabel>Apparent Power L2 (VA)</ControlPageLabel>
+      </State>
+      <State id="apparentPowerL3">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Apparent Power L3 (VA)</TriggerLabel>
+        <ControlPageLabel>Apparent Power L3 (VA)</ControlPageLabel>
+      </State>
+
+      <!-- Per-Phase Power Factor -->
+      <State id="powerFactorL1">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Factor L1</TriggerLabel>
+        <ControlPageLabel>Power Factor L1</ControlPageLabel>
+      </State>
+      <State id="powerFactorL2">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Factor L2</TriggerLabel>
+        <ControlPageLabel>Power Factor L2</ControlPageLabel>
+      </State>
+      <State id="powerFactorL3">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Power Factor L3</TriggerLabel>
+        <ControlPageLabel>Power Factor L3</ControlPageLabel>
+      </State>
+
+      <!-- Per-Phase Frequency -->
+      <State id="frequencyL1">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Frequency L1 (Hz)</TriggerLabel>
+        <ControlPageLabel>Frequency L1 (Hz)</ControlPageLabel>
+      </State>
+      <State id="frequencyL2">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Frequency L2 (Hz)</TriggerLabel>
+        <ControlPageLabel>Frequency L2 (Hz)</ControlPageLabel>
+      </State>
+      <State id="frequencyL3">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Frequency L3 (Hz)</TriggerLabel>
+        <ControlPageLabel>Frequency L3 (Hz)</ControlPageLabel>
+      </State>
+
+      <!-- Aggregate Meter Readings (from /ivp/meters/readings totals) -->
+      <State id="productionVoltage">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Voltage (V)</TriggerLabel>
+        <ControlPageLabel>Production Voltage (V)</ControlPageLabel>
+      </State>
+      <State id="productionCurrent">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Current (A)</TriggerLabel>
+        <ControlPageLabel>Production Current (A)</ControlPageLabel>
+      </State>
+      <State id="productionPowerFactor">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Power Factor</TriggerLabel>
+        <ControlPageLabel>Production Power Factor</ControlPageLabel>
+      </State>
+      <State id="productionFrequency">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Production Frequency (Hz)</TriggerLabel>
+        <ControlPageLabel>Production Frequency (Hz)</ControlPageLabel>
+      </State>
+      <State id="consumptionVoltage">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Voltage (V)</TriggerLabel>
+        <ControlPageLabel>Consumption Voltage (V)</ControlPageLabel>
+      </State>
+      <State id="consumptionCurrent">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Current (A)</TriggerLabel>
+        <ControlPageLabel>Consumption Current (A)</ControlPageLabel>
+      </State>
+      <State id="consumptionPowerFactor">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Power Factor</TriggerLabel>
+        <ControlPageLabel>Consumption Power Factor</ControlPageLabel>
+      </State>
+      <State id="consumptionFrequency">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Consumption Frequency (Hz)</TriggerLabel>
+        <ControlPageLabel>Consumption Frequency (Hz)</ControlPageLabel>
+      </State>
+      <State id="metersEnabled">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Meters Readings Available</TriggerLabel>
+        <ControlPageLabel>Meters Readings Available</ControlPageLabel>
+      </State>
 
     </States>
 
