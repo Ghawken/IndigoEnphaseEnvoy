@@ -10,12 +10,12 @@
     <CallbackMethod>refreshDataForDevAction</CallbackMethod>
   </Action>
 
-<Action id="enablePowerProduction" deviceFilter="self">
+<Action id="enablePowerProduction" deviceFilter="self.EnphaseEnvoyDevice">
     <Name>Enable Power Production</Name>
     <CallbackMethod>enablePowerProduction</CallbackMethod>
 </Action>
 
-<Action id="disablePowerProduction" deviceFilter="self">
+<Action id="disablePowerProduction" deviceFilter="self.EnphaseEnvoyDevice">
     <Name>Disable Power Production</Name>
     <CallbackMethod>disablePowerProduction</CallbackMethod>
 </Action>

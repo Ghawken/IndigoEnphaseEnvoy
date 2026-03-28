@@ -291,6 +291,31 @@ class Plugin(indigo.PluginBase):
         self.logger.debug(u"__del__ method called.")
         indigo.PluginBase.__del__(self)
 
+    def validateDeviceConfigUi(self, valuesDict, typeId, devId):
+        try:
+            self.logger.debug(f"validateDeviceConfigUi called for devId {devId}")
+            dev = indigo.devices[devId]
+            old_generate_token = dev.pluginProps.get("generate_token", False)
+            new_generate_token = valuesDict.get("generate_token", False)
+            # Token mode changed — reset token_source so the new mode starts
+            # cleanly.  auth_token is left as-is: if the user pasted a new
+            # manual token it is already in valuesDict; if they didn't, the
+            # old (generated) token can still serve until they replace it.
+            # The runtime cache (self.generated_token) is cleared separately
+            # in deviceStartComm which runs after this dialog closes.
+            if old_generate_token != new_generate_token:
+                self.logger.info(
+                    f"Token mode changed (generate_token: {old_generate_token} → {new_generate_token}) "
+                    f"— resetting token_source."
+                )
+                valuesDict["token_source"] = ""
+
+            return (True, valuesDict)
+        except Exception:
+            self.logger.debug("validateDeviceConfigUi error", exc_info=True)
+            return (True, valuesDict)
+
+
     def closedPrefsConfigUi(self, valuesDict, userCancelled):
         self.logger.debug(u"closedPrefsConfigUi() method called.")
 
@@ -329,7 +354,8 @@ class Plugin(indigo.PluginBase):
 
     # Start 'em up.
     def deviceStartComm(self, dev):
- #       self.logger.debug(u"deviceStartComm() method called.")
+ #
+ #      self.logger.debug(u"deviceStartComm() method called.")
         #self.errorLog(str(dev.model))
 
         # CHECK IF PANEL - IF PANEL START OFFLINE
@@ -346,8 +372,12 @@ class Plugin(indigo.PluginBase):
         #numer_Panels = indigo.devices.len(filter='self.EnphasePanelDevice')
         indigo.server.log(u"Starting Enphase/Envoy device: " + dev.name )
         dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
+
+        self.generated_token.pop(dev.id, None)
+        self.log_manual_expiry = True
         self.force_update.add(dev.id)
 
         dev.stateListOrDisplayStateIdChanged()
@@ -518,8 +548,10 @@ class Plugin(indigo.PluginBase):
             # 6) Do NOT log full token
             self.logger.debug(f"Enphase token ready {token_raw})")
             self.generated_token[dev.id] = token_raw
+            self._log_token_info(token_raw, dev, source="newly generated")
             localPropsCopy = dev.pluginProps
             localPropsCopy["auth_token"] = token_raw
+            localPropsCopy["token_source"] = "generated"
             dev.replacePluginPropsOnServer(localPropsCopy)
 
             return token_raw
@@ -548,6 +580,8 @@ class Plugin(indigo.PluginBase):
 
         Reads 'powerForcedOff' from /ivp/mod/603980032/mode/power.
         Only runs when an auth token is available (firmware 7.x+).
+        If the token is not installer-level the endpoint returns 401/403
+        and the device state is set to 'N/A – Installer Token Required'.
         """
         headers = self.create_headers(dev)
         if not headers:
@@ -566,9 +600,19 @@ class Plugin(indigo.PluginBase):
                 power_forced_off = data.get('powerForcedOff')
                 if power_forced_off is not None:
                     production_enabled = (power_forced_off == POWER_FORCED_OFF_FALSE)
-                    dev.updateStateOnServer('powerProductionEnabled', value=production_enabled)
+                    dev.updateStateOnServer('powerProductionEnabled',
+                                                value="Enabled" if production_enabled else "Disabled")
                     if self.debugLevel >= 2:
                         self.logger.debug(f"Power production status polled: enabled={production_enabled}")
+            elif r.status_code in (401, 403):
+                dev.updateStateOnServer('powerProductionEnabled',
+                                        value="Status Unavailable")
+                if self.debugLevel >= 1:
+                    self.logger.debug(
+                        f"Cannot poll power production status for {dev.name}. "
+                        f"HTTP {r.status_code}. "
+                        f"This endpoint requires an installer-level JWT token."
+                    )
             else:
                 if self.debugLevel >= 2:
                     self.logger.debug(f"Could not poll power production status. HTTP {r.status_code}")
@@ -621,8 +665,18 @@ class Plugin(indigo.PluginBase):
                 indigo.server.log(
                     f"Power production {'enabled' if enable else 'disabled'} for {dev.name}"
                 )
-                dev.updateStateOnServer('powerProductionEnabled', value=enable)
+                dev.updateStateOnServer('powerProductionEnabled', value="Enabled")
                 return True
+            elif r.status_code in (401, 403):
+                self.logger.info(
+                    f"Authorization failed {action_label.lower()} power production for {dev.name}. "
+                    f"HTTP {r.status_code}. "
+                    f"This endpoint requires an installer-level JWT token. "
+                    f"Please update the auth token in the device configuration."
+                )
+                dev.updateStateOnServer('powerProductionEnabled',
+                                       value="Status Unavailable")
+                return False
             else:
                 self.logger.error(
                     f"Failed to {action_label.lower()} power production for {dev.name}. "
@@ -668,7 +722,30 @@ class Plugin(indigo.PluginBase):
             self.logger.exception("Exception with check expired token.  Perhaps Crytography not installed?")
             return False
 
+    def _get_token_type(self, token):
+        """Return the enphaseUser field from the JWT payload ('owner' or 'installer'), or 'unknown'."""
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            return payload.get("enphaseUser", "unknown")
+        except Exception:
+            return "unknown"
 
+    def _log_token_info(self, token, dev, source=""):
+        """Log token type (owner/installer), expiry, and source prominently."""
+        token_type = self._get_token_type(token)
+        exp = self._get_enphase_token_expiry(token)
+        exp_str = datetime.datetime.fromtimestamp(exp).strftime("%c") if exp else "unknown"
+        prefix = f"[{dev.name}]"
+        source_str = f" ({source})" if source else ""
+        self.logger.info(
+            f"{prefix} Enphase Token Type: ** {token_type.upper()} **{source_str}  —  Expires: {exp_str}"
+        )
+        if token_type == "installer":
+            self.logger.info(f"{prefix} Installer token detected — full Envoy API access including power control.")
+        elif token_type == "owner":
+            self.logger.info(f"{prefix} Owner/Homeowner token detected — read-only data access. Power control endpoints will not be available.")
+        else:
+            self.logger.warning(f"{prefix} Could not determine token type from JWT payload.")
 
     def check_endpoints(self, valuesDict, typeId, devId):
         self.logger.info("Checking endpoints.")
@@ -968,11 +1045,12 @@ class Plugin(indigo.PluginBase):
             headers = {"Accept": "application/json", "Authorization": "Bearer "+str(auth_token)}
             self.logger.debug(f"Using Headers: {headers}")
             if self.log_manual_expiry:
-                exp = self._get_enphase_token_expiry(auth_token)
-                self.logger.info(
-                    f"[{dev.name}] Using Manual Enphase token. Expires: %s ",
-                    datetime.datetime.fromtimestamp(exp).strftime("%c") if exp else "<unknown>"
-                )
+                self._log_token_info(auth_token, dev, source="manual")
+                try:
+                    exp = self._get_enphase_token_expiry(auth_token)
+                    dev.updateStateOnServer("token_expires", f"{datetime.datetime.fromtimestamp(exp).strftime('%c') if exp else 'unknown'}")
+                except Exception:
+                    self.logger.debug("Manual token found, but could not parse expiry.", exc_info=True)
                 self.log_manual_expiry = False
 
 
@@ -981,25 +1059,33 @@ class Plugin(indigo.PluginBase):
 
         if generate_token:
             self.https_flag="s"
+            # Only trust saved auth_token if it was actually generated (not a leftover manual token)
+            token_source = dev.pluginProps.get("token_source", "")
+            saved_is_generated = (token_source == "generated")
             # Startup: only when we haven't loaded token into memory yet
             if self.generated_token.get(dev.id, "") == "":
-                saved = dev.pluginProps.get("auth_token", "")
+                saved = dev.pluginProps.get("auth_token", "") if saved_is_generated else ""
                 if saved:
                     try:
+                        self._log_token_info(saved, dev, source="saved/cached")
                         exp = self._get_enphase_token_expiry(saved)
-                        self.logger.info(
-                            f"[{dev.name}] Using saved Enphase token. Expires: %s — will auto-refresh before expiry.",
-                            datetime.datetime.fromtimestamp(exp).strftime("%c") if exp else "<unknown>"
-                        )
-                        dev.updateStateOnServer("token_expires", f"{datetime.datetime.fromtimestamp(exp).strftime('%c') if exp else 'unknown'}")
+                        dev.updateStateOnServer("token_expires",
+                                                f"{datetime.datetime.fromtimestamp(exp).strftime('%c') if exp else 'unknown'}")
                     except Exception:
                         self.logger.debug("Saved token found, but could not parse expiry.", exc_info=True)
                 else:
                     self.logger.info(
                         "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
+                    if not saved_is_generated and dev.pluginProps.get("auth_token", ""):
+                        self.logger.info(
+                            "Ignoring saved token — it was from manual entry, not generated. Will generate a fresh token.")
+                    else:
+                        self.logger.info(
+                            "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
 
             # Load token into runtime cache (after the one-time log)
-            self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id, "")
+            if saved_is_generated:
+                self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id, "")
 
             if username == "":
                 self.logger.error("To Generate a token you must enter username in device edit settings for enphase")

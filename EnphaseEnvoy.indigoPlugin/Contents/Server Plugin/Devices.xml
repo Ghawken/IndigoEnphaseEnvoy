@@ -277,7 +277,7 @@
         <ControlPageLabel>Token Expires</ControlPageLabel>
       </State>
       <State id="powerProductionEnabled">
-        <ValueType>Boolean</ValueType>
+        <ValueType>String</ValueType>
         <TriggerLabel>Power Production Enabled</TriggerLabel>
         <ControlPageLabel>Power Production Enabled</ControlPageLabel>
       </State>
