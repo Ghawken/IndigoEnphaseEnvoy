@@ -20,6 +20,11 @@
     <CallbackMethod>disablePowerProduction</CallbackMethod>
 </Action>
 
+<Action id="refreshBatteryData" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Refresh Battery &amp; Grid Data</Name>
+    <CallbackMethod>refreshBatteryDataAction</CallbackMethod>
+</Action>
+
   
 </Actions>
 

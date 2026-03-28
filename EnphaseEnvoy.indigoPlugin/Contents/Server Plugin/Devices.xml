@@ -726,4 +726,132 @@
 
   </Device>
 
+  <Device type="custom" id="EnphaseEnvoyBatteryDevice">
+    <Name>Enphase Battery &amp; Grid</Name>
+
+    <States>
+      <State id="deviceIsOnline">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Device online?</TriggerLabel>
+        <ControlPageLabel>Device online?</ControlPageLabel>
+      </State>
+      <State id="deviceLastUpdated">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Device Last Updated</TriggerLabel>
+        <ControlPageLabel>Device Last Updated</ControlPageLabel>
+      </State>
+
+      <!-- Combined Battery Summary -->
+      <State id="batteryCount">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Number of Batteries</TriggerLabel>
+        <ControlPageLabel>Number of Batteries</ControlPageLabel>
+      </State>
+      <State id="batteryState">
+        <ValueType>
+          <List>
+            <Option value="unknown">Unknown</Option>
+            <Option value="idle">Idle</Option>
+            <Option value="charging">Charging</Option>
+            <Option value="discharging">Discharging</Option>
+            <Option value="offline">Offline</Option>
+          </List>
+        </ValueType>
+        <TriggerLabel>Battery State</TriggerLabel>
+        <ControlPageLabel>Battery State</ControlPageLabel>
+      </State>
+      <State id="batteryPercentFull">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Percent Full (%)</TriggerLabel>
+        <ControlPageLabel>Battery Percent Full (%)</ControlPageLabel>
+      </State>
+      <State id="batteryWattsNow">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Power Now (W)</TriggerLabel>
+        <ControlPageLabel>Battery Power Now (W)</ControlPageLabel>
+      </State>
+      <State id="batteryWhNow">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Energy Stored (Wh)</TriggerLabel>
+        <ControlPageLabel>Battery Energy Stored (Wh)</ControlPageLabel>
+      </State>
+      <State id="batteryTotalCapacityWh">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Total Capacity (Wh)</TriggerLabel>
+        <ControlPageLabel>Battery Total Capacity (Wh)</ControlPageLabel>
+      </State>
+      <State id="batteryTotalkW">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Total Capacity (kW)</TriggerLabel>
+        <ControlPageLabel>Battery Total Capacity (kW)</ControlPageLabel>
+      </State>
+      <State id="batteryChargeWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Charge Rate (W)</TriggerLabel>
+        <ControlPageLabel>Battery Charge Rate (W)</ControlPageLabel>
+      </State>
+      <State id="batteryDischargeWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Discharge Rate (W)</TriggerLabel>
+        <ControlPageLabel>Battery Discharge Rate (W)</ControlPageLabel>
+      </State>
+      <State id="batteryTemperature">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Average Temperature (C)</TriggerLabel>
+        <ControlPageLabel>Battery Average Temperature (C)</ControlPageLabel>
+      </State>
+      <State id="batteryMaxCellTemp">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Battery Max Cell Temperature (C)</TriggerLabel>
+        <ControlPageLabel>Battery Max Cell Temperature (C)</ControlPageLabel>
+      </State>
+      <State id="batteryCommunicating">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Battery Communicating</TriggerLabel>
+        <ControlPageLabel>Battery Communicating</ControlPageLabel>
+      </State>
+      <State id="batteryOperating">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Battery Operating</TriggerLabel>
+        <ControlPageLabel>Battery Operating</ControlPageLabel>
+      </State>
+      <State id="batterySerialNumbers">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Battery Serial Numbers</TriggerLabel>
+        <ControlPageLabel>Battery Serial Numbers</ControlPageLabel>
+      </State>
+      <State id="batteryFirmware">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Battery Firmware Version</TriggerLabel>
+        <ControlPageLabel>Battery Firmware Version</ControlPageLabel>
+      </State>
+
+      <!-- Grid Status -->
+      <State id="gridStatus">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Grid Status</TriggerLabel>
+        <ControlPageLabel>Grid Status</ControlPageLabel>
+      </State>
+      <State id="gridImportWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Grid Import Power (W)</TriggerLabel>
+        <ControlPageLabel>Grid Import Power (W)</ControlPageLabel>
+      </State>
+      <State id="gridExportWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Grid Export Power (W)</TriggerLabel>
+        <ControlPageLabel>Grid Export Power (W)</ControlPageLabel>
+      </State>
+      <State id="gridNetWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Grid Net Power (W)</TriggerLabel>
+        <ControlPageLabel>Grid Net Power (W)</ControlPageLabel>
+      </State>
+
+    </States>
+
+    <UiDisplayStateId>batteryState</UiDisplayStateId>
+
+  </Device>
+
 </Devices>

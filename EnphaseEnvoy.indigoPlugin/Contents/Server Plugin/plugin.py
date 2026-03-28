@@ -368,6 +368,13 @@ class Plugin(indigo.PluginBase):
             dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
             dev.stateListOrDisplayStateIdChanged()
             return
+
+        if dev.model=='Enphase Battery & Grid':
+            indigo.server.log(u"Starting Enphase Battery & Grid device: " + dev.name)
+            dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+            dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
+            dev.stateListOrDisplayStateIdChanged()
+            return
         #number_Panels = 0
         #numer_Panels = indigo.devices.len(filter='self.EnphasePanelDevice')
         indigo.server.log(u"Starting Enphase/Envoy device: " + dev.name )
@@ -811,6 +818,7 @@ class Plugin(indigo.PluginBase):
                       "http{}://{}/ivp/meters",
                       "http{}://{}/ivp/meters/readings",
                       "http{}://{}/ivp/livedata/status",
+                      "http{}://{}/ivp/ensemble/inventory",
                       "http{}://{}/ivp/meters/reports/consumption",
                       "http{}://{}/info.xml"
                       ]
@@ -2068,6 +2076,11 @@ class Plugin(indigo.PluginBase):
                     self.logger.debug(u'Updating Cost Device')
                 self.updateCostDevice(dev, costdev)
 
+            for battdev in indigo.devices.iter('self.EnphaseEnvoyBatteryDevice'):
+                if self.debugLevel > 2:
+                    self.logger.debug(u'Updating Battery Device')
+                self.updateBatteryDevice(dev, battdev)
+
         except Exception as error:
              if self.debugLevel >= 2:
                  self.errorLog(u"Saving Values errors:"+str(error) + str(error) )
@@ -2142,8 +2155,204 @@ class Plugin(indigo.PluginBase):
             self.logger.exception(u'Exception within Cost Device Calculation:'+str(error))
             return
 
+    # ─────────────────────────────────────────────────────────────
+    # Battery & Grid Device
+    # ─────────────────────────────────────────────────────────────
 
+    def getEnsembleInventory(self, dev):
+        """
+        Fetch battery inventory from /ivp/ensemble/inventory.
+        Returns the JSON array, or None on failure.
+        The Envoy device (not the battery device) is used for IP/auth.
+        """
+        try:
+            headers = self.create_headers(dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/ensemble/inventory"
+            r = self._get(url, headers=headers)
+            if r.status_code == 200:
+                result = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Ensemble Inventory Result: {result}")
+                return result
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Ensemble Inventory returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching ensemble inventory: {error}")
+            return None
 
+    def updateBatteryDevice(self, envoyDev, battDev):
+        """
+        Fetch battery data from the Envoy API and update the combined
+        battery device states. Uses /ivp/ensemble/inventory for per-battery
+        details (percentFull, temperature, capacity) and the storage data
+        from production.json for aggregate wNow/state.
+
+        envoyDev: the parent EnphaseEnvoyDevice (has IP, auth, storage data)
+        battDev:  the EnphaseEnvoyBatteryDevice to update
+        """
+        if self.debugLevel >= 2:
+            self.logger.debug(u'updateBatteryDevice Run')
+
+        try:
+            # ── Pull aggregate storage data from the parent Envoy device ──
+            storageCount = int(envoyDev.states.get('storageActiveCount', 0))
+            storageWattsNow = int(envoyDev.states.get('storageWattsNow', 0))
+            storageState = str(envoyDev.states.get('storageState', 'unknown'))
+
+            battDev.updateStateOnServer('batteryCount', value=storageCount)
+            battDev.updateStateOnServer('batteryWattsNow', value=storageWattsNow)
+
+            # Determine charge vs discharge from wNow sign
+            # Positive wNow = discharging, Negative = charging (Enphase convention)
+            if storageWattsNow > 0:
+                battDev.updateStateOnServer('batteryChargeWatts', value=0)
+                battDev.updateStateOnServer('batteryDischargeWatts', value=storageWattsNow)
+            elif storageWattsNow < 0:
+                battDev.updateStateOnServer('batteryChargeWatts', value=abs(storageWattsNow))
+                battDev.updateStateOnServer('batteryDischargeWatts', value=0)
+            else:
+                battDev.updateStateOnServer('batteryChargeWatts', value=0)
+                battDev.updateStateOnServer('batteryDischargeWatts', value=0)
+
+            # Map storage state to battery state
+            stateMap = {
+                'idle': 'idle',
+                'charging': 'charging',
+                'discharging': 'discharging',
+                'full': 'idle',
+                'Offline': 'offline',
+                'No Data': 'unknown',
+            }
+            battState = stateMap.get(storageState, 'unknown')
+            battDev.updateStateOnServer('batteryState', value=battState)
+
+            # ── Calculate grid import/export from parent Envoy ──
+            netConsumption = int(envoyDev.states.get('netConsumptionWattsNow', 0))
+
+            # netConsumption: positive = importing from grid, negative = exporting to grid
+            gridImport = max(0, netConsumption)
+            gridExport = max(0, -netConsumption)
+            battDev.updateStateOnServer('gridImportWatts', value=gridImport)
+            battDev.updateStateOnServer('gridExportWatts', value=gridExport)
+            battDev.updateStateOnServer('gridNetWatts', value=netConsumption)
+
+            # ── Fetch detailed battery inventory from /ivp/ensemble/inventory ──
+            inventoryData = self.getEnsembleInventory(envoyDev)
+
+            totalCapacityWh = 0
+            totalPercentFull = 0
+            totalTemp = 0
+            maxCellTemp = 0
+            batteryDeviceCount = 0
+            serialNumbers = []
+            firmwareVersions = set()
+            allCommunicating = True
+            allOperating = True
+
+            if inventoryData is not None:
+                for entry in inventoryData:
+                    entryType = entry.get('type', '').upper()
+                    if entryType != 'ENCHARGE':
+                        continue
+                    devices = entry.get('devices', [])
+                    for battery in devices:
+                        batteryDeviceCount += 1
+                        serialNumbers.append(str(battery.get('serial_num', 'unknown')))
+                        fw = battery.get('img_pnum_running', '')
+                        if fw:
+                            firmwareVersions.add(fw)
+                        capacity = int(battery.get('encharge_capacity', 0))
+                        totalCapacityWh += capacity
+                        pctFull = int(battery.get('percentFull', 0))
+                        totalPercentFull += pctFull
+                        temp = int(battery.get('temperature', 0))
+                        totalTemp += temp
+                        cellTemp = int(battery.get('maxCellTemp', 0))
+                        if cellTemp > maxCellTemp:
+                            maxCellTemp = cellTemp
+                        if not battery.get('communicating', False):
+                            allCommunicating = False
+                        if not battery.get('operating', False):
+                            allOperating = False
+
+            avgPercentFull = 0
+            if batteryDeviceCount > 0:
+                avgPercentFull = int(totalPercentFull / batteryDeviceCount)
+                avgTemp = int(totalTemp / batteryDeviceCount)
+                battDev.updateStateOnServer('batteryPercentFull', value=avgPercentFull,
+                                            uiValue=f"{avgPercentFull}%")
+                battDev.updateStateOnServer('batteryTemperature', value=avgTemp)
+                battDev.updateStateOnServer('batteryMaxCellTemp', value=maxCellTemp)
+                battDev.updateStateOnServer('batteryCount', value=batteryDeviceCount)
+                battDev.updateStateOnServer('batteryCommunicating', value=allCommunicating)
+                battDev.updateStateOnServer('batteryOperating', value=allOperating)
+                battDev.updateStateOnServer('batterySerialNumbers',
+                                            value=', '.join(serialNumbers))
+                battDev.updateStateOnServer('batteryFirmware',
+                                            value=', '.join(sorted(firmwareVersions)))
+            else:
+                battDev.updateStateOnServer('batteryPercentFull', value=0, uiValue="N/A")
+                battDev.updateStateOnServer('batteryTemperature', value=0)
+                battDev.updateStateOnServer('batteryMaxCellTemp', value=0)
+                battDev.updateStateOnServer('batteryCommunicating', value=False)
+                battDev.updateStateOnServer('batteryOperating', value=False)
+                battDev.updateStateOnServer('batterySerialNumbers', value='')
+                battDev.updateStateOnServer('batteryFirmware', value='')
+
+            battDev.updateStateOnServer('batteryTotalCapacityWh', value=totalCapacityWh)
+            battDev.updateStateOnServer('batteryTotalkW',
+                                        value=round(totalCapacityWh / 1000, 2))
+            battDev.updateStateOnServer('batteryWhNow',
+                                        value=int(totalCapacityWh * avgPercentFull / 100) if batteryDeviceCount > 0 else 0)
+
+            # ── Grid status ──
+            if envoyDev.states.get('deviceIsOnline', False):
+                powerStatus = envoyDev.states.get('powerStatus', 'unknown')
+                if powerStatus == 'exporting':
+                    battDev.updateStateOnServer('gridStatus', value='Exporting')
+                elif powerStatus == 'importing':
+                    battDev.updateStateOnServer('gridStatus', value='Importing')
+                elif powerStatus == 'offline':
+                    battDev.updateStateOnServer('gridStatus', value='Offline')
+                else:
+                    battDev.updateStateOnServer('gridStatus', value='Connected')
+            else:
+                battDev.updateStateOnServer('gridStatus', value='Unknown')
+
+            # ── Update timestamps and online status ──
+            battDev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
+            update_time = t.strftime("%m/%d/%Y at %H:%M")
+            battDev.updateStateOnServer('deviceLastUpdated', value=update_time)
+
+            # ── Update state image based on battery activity ──
+            if battState == 'charging':
+                battDev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
+            elif battState == 'discharging':
+                battDev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
+            elif battState == 'idle':
+                battDev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+            else:
+                battDev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception updating battery device: {error}")
+                self.logger.exception("updateBatteryDevice Exception")
+
+    def refreshBatteryDataAction(self, pluginAction):
+        """Action callback: Refresh Battery & Grid Data for selected battery device."""
+        battDev = pluginAction.device
+        if self.debugLevel >= 2:
+            self.logger.debug(f"refreshBatteryDataAction called for {battDev.name}")
+        # Find the parent EnphaseEnvoyDevice to pull data from
+        for envoyDev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
+            if envoyDev.enabled and envoyDev.states.get('deviceIsOnline', False):
+                self.updateBatteryDevice(envoyDev, battDev)
+                return
+        self.logger.info("No online EnphaseEnvoyDevice found to refresh battery data from.")
 
 
     def setStatestonil(self, dev):
