@@ -67,6 +67,11 @@ ENVOY_POWER_MODE_PATH = "/ivp/mod/603980032/mode/power"
 POWER_FORCED_OFF_FALSE = 0  # production enabled
 POWER_FORCED_OFF_TRUE = 1   # production disabled
 
+# Enphase Envoy battery/tariff control constants.
+# Based on pyenphase (Home Assistant) local API endpoints.
+ENVOY_TARIFF_PATH = "/admin/lib/tariff"
+ENVOY_GRID_RELAY_PATH = "/ivp/ensemble/relay"
+
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -2327,6 +2332,23 @@ class Plugin(indigo.PluginBase):
             update_time = t.strftime("%m/%d/%Y at %H:%M")
             battDev.updateStateOnServer('deviceLastUpdated', value=update_time)
 
+            # ── Fetch and display tariff/storage settings ──
+            tariffData = self._getTariffData(envoyDev)
+            if tariffData is not None:
+                try:
+                    tariffObj = tariffData.get('tariff', tariffData)
+                    storageSettings = tariffObj.get('storage_settings', {})
+                    if storageSettings:
+                        currentMode = storageSettings.get('mode', 'unknown')
+                        chargeFromGrid = storageSettings.get('charge_from_grid', False)
+                        reservedSoc = storageSettings.get('reserved_soc', 0)
+                        battDev.updateStateOnServer('storageMode', value=str(currentMode))
+                        battDev.updateStateOnServer('chargeFromGrid', value=bool(chargeFromGrid))
+                        battDev.updateStateOnServer('reserveSOC', value=int(float(reservedSoc)))
+                except Exception as tariffErr:
+                    if self.debugLevel >= 2:
+                        self.logger.debug(f"Error parsing tariff storage settings: {tariffErr}")
+
             # ── Update state image based on battery activity ──
             if battState == 'charging':
                 battDev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
@@ -2353,6 +2375,259 @@ class Plugin(indigo.PluginBase):
                 self.updateBatteryDevice(envoyDev, battDev)
                 return
         self.logger.info("No online EnphaseEnvoyDevice found to refresh battery data from.")
+
+    # ─────────────────────────────────────────────────────────────
+    # Battery Control Actions (Tariff-based)
+    # ─────────────────────────────────────────────────────────────
+
+    def _getParentEnvoyDev(self):
+        """Find the first enabled, online EnphaseEnvoyDevice to use for API calls."""
+        for envoyDev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
+            if envoyDev.enabled and envoyDev.states.get('deviceIsOnline', False):
+                return envoyDev
+        return None
+
+    def _getTariffData(self, envoyDev):
+        """
+        Fetch current tariff data from /admin/lib/tariff.
+        Returns the JSON dict, or None on failure.
+        """
+        try:
+            headers = self.create_headers(envoyDev)
+            if not headers and self.using_token:
+                self.logger.error("No auth token available for tariff request.")
+                return None
+            url = f"http{self.https_flag}://{envoyDev.pluginProps['sourceXML']}{ENVOY_TARIFF_PATH}"
+            r = self._get(url, headers=headers)
+            if r.status_code == 200:
+                result = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Tariff Data Result: {result}")
+                return result
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Tariff endpoint returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching tariff data: {error}")
+            return None
+
+    def _putTariffData(self, envoyDev, tariffData):
+        """
+        PUT updated tariff data to /admin/lib/tariff.
+        Returns True on success, False on failure.
+        Based on pyenphase: PUT /admin/lib/tariff with {"tariff": <tariff_object>}
+        """
+        try:
+            headers = self.create_headers(envoyDev)
+            if not headers and self.using_token:
+                self.logger.error(
+                    "No auth token configured. "
+                    "Battery control requires a JWT token (firmware 7.x+)."
+                )
+                return False
+
+            ip_address = envoyDev.pluginProps.get('sourceXML', '')
+            if not ip_address:
+                self.logger.error(f"No IP address configured for device: {envoyDev.name}")
+                return False
+
+            url = f"http{self.https_flag}://{ip_address}{ENVOY_TARIFF_PATH}"
+            payload = json.dumps({"tariff": tariffData})
+            headers['Content-Type'] = 'application/json'
+
+            if self.debugLevel >= 2:
+                self.logger.debug(f"PUT {url}")
+
+            host = urlsplit(url).netloc
+            session = self.session_cache[host]
+            r = session.put(url, data=payload, headers=headers,
+                            timeout=self.prefServerTimeout, allow_redirects=True)
+
+            if r.status_code == 200:
+                return True
+            elif r.status_code in (401, 403):
+                self.logger.info(
+                    f"Authorization failed for tariff update on {envoyDev.name}. "
+                    f"HTTP {r.status_code}. "
+                    f"This endpoint may require an installer-level JWT token."
+                )
+                return False
+            else:
+                self.logger.error(
+                    f"Failed to update tariff for {envoyDev.name}. "
+                    f"HTTP {r.status_code}: {r.text}"
+                )
+                return False
+
+        except requests.exceptions.Timeout:
+            self.logger.error(f"Timeout updating tariff for: {envoyDev.name}")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.error(f"Connection error updating tariff for: {envoyDev.name}")
+            return False
+        except Exception as err:
+            self.logger.error(f"Error updating tariff for {envoyDev.name}: {err}")
+            return False
+
+    def _setStorageMode(self, battDev, mode):
+        """
+        Set storage mode via /admin/lib/tariff PUT.
+        mode: 'self-consumption', 'savings', or 'backup'
+        """
+        envoyDev = self._getParentEnvoyDev()
+        if not envoyDev:
+            self.logger.error("No online EnphaseEnvoyDevice found for battery control.")
+            return False
+
+        tariffData = self._getTariffData(envoyDev)
+        if tariffData is None:
+            self.logger.error("Could not fetch current tariff data for storage mode change.")
+            return False
+
+        # Navigate to storage_settings and update mode
+        try:
+            if 'tariff' in tariffData:
+                tariffObj = tariffData['tariff']
+            else:
+                tariffObj = tariffData
+
+            if 'storage_settings' not in tariffObj:
+                self.logger.error("No storage_settings found in tariff data. Battery may not be configured.")
+                return False
+
+            tariffObj['storage_settings']['mode'] = mode
+
+            if self._putTariffData(envoyDev, tariffObj):
+                indigo.server.log(f"Storage mode set to '{mode}' for {battDev.name}")
+                battDev.updateStateOnServer('storageMode', value=mode)
+                return True
+            return False
+
+        except Exception as error:
+            self.logger.error(f"Error setting storage mode: {error}")
+            return False
+
+    def _setChargeFromGrid(self, battDev, enable):
+        """
+        Enable or disable charge from grid via /admin/lib/tariff PUT.
+        """
+        envoyDev = self._getParentEnvoyDev()
+        if not envoyDev:
+            self.logger.error("No online EnphaseEnvoyDevice found for battery control.")
+            return False
+
+        tariffData = self._getTariffData(envoyDev)
+        if tariffData is None:
+            self.logger.error("Could not fetch current tariff data for charge-from-grid change.")
+            return False
+
+        try:
+            if 'tariff' in tariffData:
+                tariffObj = tariffData['tariff']
+            else:
+                tariffObj = tariffData
+
+            if 'storage_settings' not in tariffObj:
+                self.logger.error("No storage_settings found in tariff data. Battery may not be configured.")
+                return False
+
+            tariffObj['storage_settings']['charge_from_grid'] = enable
+
+            action_label = "Enabling" if enable else "Disabling"
+            if self._putTariffData(envoyDev, tariffObj):
+                indigo.server.log(f"{action_label} charge from grid for {battDev.name}")
+                battDev.updateStateOnServer('chargeFromGrid', value=enable)
+                return True
+            return False
+
+        except Exception as error:
+            self.logger.error(f"Error setting charge from grid: {error}")
+            return False
+
+    def _setReserveSOC(self, battDev, value):
+        """
+        Set the battery reserve state of charge (%) via /admin/lib/tariff PUT.
+        value: integer 0-100
+        """
+        envoyDev = self._getParentEnvoyDev()
+        if not envoyDev:
+            self.logger.error("No online EnphaseEnvoyDevice found for battery control.")
+            return False
+
+        # Validate range
+        value = max(0, min(100, int(value)))
+
+        tariffData = self._getTariffData(envoyDev)
+        if tariffData is None:
+            self.logger.error("Could not fetch current tariff data for reserve SOC change.")
+            return False
+
+        try:
+            if 'tariff' in tariffData:
+                tariffObj = tariffData['tariff']
+            else:
+                tariffObj = tariffData
+
+            if 'storage_settings' not in tariffObj:
+                self.logger.error("No storage_settings found in tariff data. Battery may not be configured.")
+                return False
+
+            tariffObj['storage_settings']['reserved_soc'] = round(float(value), 1)
+
+            if self._putTariffData(envoyDev, tariffObj):
+                indigo.server.log(f"Reserve SOC set to {value}% for {battDev.name}")
+                battDev.updateStateOnServer('reserveSOC', value=value)
+                return True
+            return False
+
+        except Exception as error:
+            self.logger.error(f"Error setting reserve SOC: {error}")
+            return False
+
+    # ── Battery Action Callbacks ──
+
+    def setStorageModeSelfConsumptionAction(self, pluginAction):
+        """Action callback: Set storage mode to self-consumption."""
+        battDev = pluginAction.device
+        self.logger.info(f"Setting storage mode to self-consumption for {battDev.name}")
+        self._setStorageMode(battDev, 'self-consumption')
+
+    def setStorageModeSavingsAction(self, pluginAction):
+        """Action callback: Set storage mode to savings."""
+        battDev = pluginAction.device
+        self.logger.info(f"Setting storage mode to savings for {battDev.name}")
+        self._setStorageMode(battDev, 'savings')
+
+    def setStorageModeFullBackupAction(self, pluginAction):
+        """Action callback: Set storage mode to full backup."""
+        battDev = pluginAction.device
+        self.logger.info(f"Setting storage mode to full backup for {battDev.name}")
+        self._setStorageMode(battDev, 'backup')
+
+    def enableChargeFromGridAction(self, pluginAction):
+        """Action callback: Enable charge from grid."""
+        battDev = pluginAction.device
+        self.logger.info(f"Enabling charge from grid for {battDev.name}")
+        self._setChargeFromGrid(battDev, True)
+
+    def disableChargeFromGridAction(self, pluginAction):
+        """Action callback: Disable charge from grid."""
+        battDev = pluginAction.device
+        self.logger.info(f"Disabling charge from grid for {battDev.name}")
+        self._setChargeFromGrid(battDev, False)
+
+    def setReserveSOCAction(self, pluginAction):
+        """Action callback: Set battery reserve SOC percentage."""
+        battDev = pluginAction.device
+        try:
+            reservePercent = int(pluginAction.props.get('reservePercent', 20))
+        except (ValueError, TypeError):
+            self.logger.error("Invalid reserve percentage value. Must be a number 0-100.")
+            return
+        self.logger.info(f"Setting reserve SOC to {reservePercent}% for {battDev.name}")
+        self._setReserveSOC(battDev, reservePercent)
 
 
     def setStatestonil(self, dev):

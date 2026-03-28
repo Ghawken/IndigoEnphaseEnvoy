@@ -848,6 +848,23 @@
         <ControlPageLabel>Grid Net Power (W)</ControlPageLabel>
       </State>
 
+      <!-- Battery Storage Settings (from /admin/lib/tariff) -->
+      <State id="storageMode">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Storage Mode</TriggerLabel>
+        <ControlPageLabel>Storage Mode</ControlPageLabel>
+      </State>
+      <State id="chargeFromGrid">
+        <ValueType>Boolean</ValueType>
+        <TriggerLabel>Charge from Grid</TriggerLabel>
+        <ControlPageLabel>Charge from Grid</ControlPageLabel>
+      </State>
+      <State id="reserveSOC">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Reserve SOC (%)</TriggerLabel>
+        <ControlPageLabel>Reserve SOC (%)</ControlPageLabel>
+      </State>
+
     </States>
 
     <UiDisplayStateId>batteryState</UiDisplayStateId>
