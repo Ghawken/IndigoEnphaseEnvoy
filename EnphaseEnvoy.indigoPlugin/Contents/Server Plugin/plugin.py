@@ -1671,6 +1671,128 @@ class Plugin(indigo.PluginBase):
                 result = None
                 return result
 
+    def getMetersReadings(self, dev):
+        """
+        Fetch per-phase meter data from /ivp/meters/readings.
+        Returns the JSON array of meter objects (each with 'channels' for per-phase data),
+        or None on failure.
+        """
+        try:
+            headers = self.create_headers(dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/meters/readings"
+            r = self._get(url, headers=headers)
+            if r.status_code == 200:
+                result = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Meters Readings Result: {result}")
+                return result
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Meters Readings returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching meters readings: {error}")
+            return None
+
+    def parseMetersReadings(self, dev, metersData):
+        """
+        Parse the /ivp/meters/readings response and update per-phase device states.
+        The response is a list of meter objects. Each meter may be production or
+        consumption type (identified by measurementType or eid). Each meter has
+        a 'channels' array with per-phase (L1, L2, L3) data.
+        Meter-level fields: voltage, current, activePower, apparentPower,
+                           reactivePower, pwrFactor, freq
+        Channel-level fields (per-phase): same fields as meter level
+        """
+        if metersData is None:
+            return
+        try:
+            # Identify production and consumption meters
+            # The /ivp/meters endpoint returns meter config with measurementType
+            # but /ivp/meters/readings uses eid to match. We'll try to identify
+            # by checking for known patterns or by meter order (production first, consumption second).
+            productionMeter = None
+            consumptionMeter = None
+            for meter in metersData:
+                # Some firmware versions include measurementType directly
+                mtype = meter.get('measurementType', '')
+                if mtype == 'production':
+                    productionMeter = meter
+                elif mtype in ('total-consumption', 'net-consumption'):
+                    if consumptionMeter is None:  # prefer total-consumption
+                        consumptionMeter = meter
+            # Fallback: if measurementType not present, use /ivp/meters to identify
+            # For now, use positional: first meter = production, second = consumption
+            if productionMeter is None and consumptionMeter is None and len(metersData) >= 1:
+                productionMeter = metersData[0]
+                if len(metersData) >= 2:
+                    consumptionMeter = metersData[1]
+            dev.updateStateOnServer('metersEnabled', value=True)
+            # Parse production meter aggregate values
+            if productionMeter is not None:
+                self._updateMeterAggregates(dev, productionMeter, 'production')
+                self._updatePhaseChannels(dev, productionMeter, 'production')
+            # Parse consumption meter aggregate values
+            if consumptionMeter is not None:
+                self._updateMeterAggregates(dev, consumptionMeter, 'consumption')
+                self._updatePhaseChannels(dev, consumptionMeter, 'consumption')
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception parsing meters readings: {error}")
+                self.logger.exception("parseMetersReadings Exception")
+
+    def _updateMeterAggregates(self, dev, meter, meterType):
+        """Update aggregate (total) meter states for production or consumption."""
+        prefix = meterType  # 'production' or 'consumption'
+        try:
+            voltage = round(meter.get('voltage', 0), 1)
+            current = round(meter.get('current', 0), 3)
+            pwrFactor = round(meter.get('pwrFactor', 0), 2)
+            freq = round(meter.get('freq', 0), 3)
+            dev.updateStateOnServer(f'{prefix}Voltage', value=voltage)
+            dev.updateStateOnServer(f'{prefix}Current', value=current)
+            dev.updateStateOnServer(f'{prefix}PowerFactor', value=pwrFactor)
+            dev.updateStateOnServer(f'{prefix}Frequency', value=freq)
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Error updating {prefix} meter aggregates: {error}")
+
+    def _updatePhaseChannels(self, dev, meter, meterType):
+        """
+        Update per-phase (L1/L2/L3) states from meter channels array.
+        Channels are ordered L1, L2, L3 by array index.
+        """
+        channels = meter.get('channels', [])
+        if not channels:
+            return
+        phaseLabels = ['L1', 'L2', 'L3']
+        for idx, channel in enumerate(channels):
+            if idx >= 3:
+                break
+            phase = phaseLabels[idx]
+            try:
+                activePower = round(channel.get('activePower', channel.get('instantaneousDemand', 0)), 1)
+                voltage = round(channel.get('voltage', 0), 1)
+                current = round(channel.get('current', 0), 3)
+                apparentPower = round(channel.get('apparentPower', 0), 1)
+                pwrFactor = round(channel.get('pwrFactor', 0), 2)
+                freq = round(channel.get('freq', 0), 3)
+                if meterType == 'production':
+                    dev.updateStateOnServer(f'productionWatts{phase}', value=activePower)
+                elif meterType == 'consumption':
+                    dev.updateStateOnServer(f'consumptionWatts{phase}', value=activePower)
+                # Voltage/current/apparent power - use production meter for these shared values
+                if meterType == 'production':
+                    dev.updateStateOnServer(f'voltage{phase}', value=voltage)
+                    dev.updateStateOnServer(f'current{phase}', value=current)
+                    dev.updateStateOnServer(f'apparentPower{phase}', value=apparentPower)
+                    dev.updateStateOnServer(f'powerFactor{phase}', value=pwrFactor)
+                    dev.updateStateOnServer(f'frequency{phase}', value=freq)
+            except Exception as error:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Error updating phase {phase} for {meterType}: {error}")
+
     def legacyParseStateValues(self, dev, results):
         """
         The parseStateValues() method walks through the dict and assigns the
@@ -2204,6 +2326,10 @@ class Plugin(indigo.PluginBase):
                     data = self.gettheDataChoice(dev)
                     self.parseStateValues(dev, data)
                     self._pollPowerProductionStatus(dev)
+                    # Fetch and parse per-phase meter readings for metered systems
+                    if dev.states.get('typeEnvoy') == "Metered":
+                        metersData = self.getMetersReadings(dev)
+                        self.parseMetersReadings(dev, metersData)
             else:
                 if self.debugLevel >= 2:
                     self.logger.debug(u"    Disabled: {0}".format(dev.name))
