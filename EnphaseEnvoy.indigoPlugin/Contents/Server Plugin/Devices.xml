@@ -748,15 +748,7 @@
         <ControlPageLabel>Number of Batteries</ControlPageLabel>
       </State>
       <State id="batteryState">
-        <ValueType>
-          <List>
-            <Option value="unknown">Unknown</Option>
-            <Option value="idle">Idle</Option>
-            <Option value="charging">Charging</Option>
-            <Option value="discharging">Discharging</Option>
-            <Option value="offline">Offline</Option>
-          </List>
-        </ValueType>
+        <ValueType>String</ValueType>
         <TriggerLabel>Battery State</TriggerLabel>
         <ControlPageLabel>Battery State</ControlPageLabel>
       </State>
