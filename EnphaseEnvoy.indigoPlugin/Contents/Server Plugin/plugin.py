@@ -374,7 +374,7 @@ class Plugin(indigo.PluginBase):
             dev.stateListOrDisplayStateIdChanged()
             return
 
-        if dev.model=='Enphase Battery & Grid':
+        if dev.deviceTypeId == 'EnphaseEnvoyBatteryDevice':
             indigo.server.log(u"Starting Enphase Battery & Grid device: " + dev.name)
             dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
             dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
@@ -482,6 +482,11 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('wattHoursToday', value=0)
             dev.updateStateOnServer('wattsNow', value=0)
             dev.updateStateOnServer('powerStatus', value='offline', uiValue='Offline')
+        if dev.deviceTypeId == 'EnphaseEnvoyBatteryDevice':
+            dev.updateStateOnServer('batteryState', value='offline', uiValue='Offline')
+            dev.updateStateOnServer('batteryCommunicating', value=False)
+            dev.updateStateOnServer('batteryOperating', value=False)
+            dev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
     def forceUpdate(self):
         self.updater.update(currentVersion='0.0.0')
 
