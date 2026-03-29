@@ -19,7 +19,44 @@
     <Name>Disable Power Production</Name>
     <CallbackMethod>disablePowerProduction</CallbackMethod>
 </Action>
+<Action id="setStorageModeSelfConsumption" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Set Storage Mode: Self-Consumption</Name>
+    <CallbackMethod>setStorageModeSelfConsumptionAction</CallbackMethod>
+</Action>
 
-  
+<Action id="setStorageModeSavings" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Set Storage Mode: Savings</Name>
+    <CallbackMethod>setStorageModeSavingsAction</CallbackMethod>
+</Action>
+
+<Action id="setStorageModeFullBackup" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Set Storage Mode: Full Backup</Name>
+    <CallbackMethod>setStorageModeFullBackupAction</CallbackMethod>
+</Action>
+
+<Action id="enableChargeFromGrid" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Enable Charge from Grid</Name>
+    <CallbackMethod>enableChargeFromGridAction</CallbackMethod>
+</Action>
+
+<Action id="disableChargeFromGrid" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Disable Charge from Grid</Name>
+    <CallbackMethod>disableChargeFromGridAction</CallbackMethod>
+</Action>
+
+<Action id="setReserveSOC" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Set Battery Reserve Percentage</Name>
+    <CallbackMethod>setReserveSOCAction</CallbackMethod>
+    <ConfigUI>
+      <Field id="reservePercent" type="textfield" defaultValue="20">
+        <Label>Reserve SOC (0-100%):</Label>
+      </Field>
+    </ConfigUI>
+</Action>
+
+<Action id="refreshBatteryData" deviceFilter="self.EnphaseEnvoyBatteryDevice">
+    <Name>Refresh Battery &amp; Grid Data</Name>
+    <CallbackMethod>refreshBatteryDataAction</CallbackMethod>
+</Action>
 </Actions>
 
