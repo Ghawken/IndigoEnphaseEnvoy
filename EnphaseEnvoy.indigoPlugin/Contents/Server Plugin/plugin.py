@@ -299,6 +299,9 @@ class Plugin(indigo.PluginBase):
     def validateDeviceConfigUi(self, valuesDict, typeId, devId):
         try:
             self.logger.debug(f"validateDeviceConfigUi called for devId {devId}")
+            # Token-mode logic only applies to EnphaseEnvoyDevice
+            if typeId != "EnphaseEnvoyDevice":
+                return (True, valuesDict)
             dev = indigo.devices[devId]
             old_generate_token = dev.pluginProps.get("generate_token", False)
             new_generate_token = valuesDict.get("generate_token", False)
