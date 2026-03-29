@@ -1759,10 +1759,15 @@ class Plugin(indigo.PluginBase):
             current = round(meter.get('current', 0), 3)
             pwrFactor = round(meter.get('pwrFactor', 0), 2)
             freq = round(meter.get('freq', 0), 3)
-            dev.updateStateOnServer(f'{prefix}Voltage', value=voltage)
-            dev.updateStateOnServer(f'{prefix}Current', value=current)
-            dev.updateStateOnServer(f'{prefix}PowerFactor', value=pwrFactor)
-            dev.updateStateOnServer(f'{prefix}Frequency', value=freq)
+            stateList = [
+                {'key': f'{prefix}Voltage', 'value': voltage, 'uiValue': f'{voltage:.1f}'},
+                {'key': f'{prefix}Current', 'value': current, 'uiValue': f'{current:.3f}'},
+                {'key': f'{prefix}PowerFactor', 'value': pwrFactor, 'uiValue': f'{pwrFactor:.2f}'},
+                {'key': f'{prefix}Frequency', 'value': freq, 'uiValue': f'{freq:.3f}'},
+            ]
+            dev.updateStatesOnServer(stateList)
+
+
         except Exception as error:
             if self.debugLevel >= 2:
                 self.logger.debug(f"Error updating {prefix} meter aggregates: {error}")
@@ -1776,6 +1781,7 @@ class Plugin(indigo.PluginBase):
         if not channels:
             return
         phaseLabels = ['L1', 'L2', 'L3']
+        stateList = []
         for idx, channel in enumerate(channels):
             if idx >= 3:
                 break
@@ -1788,19 +1794,20 @@ class Plugin(indigo.PluginBase):
                 pwrFactor = round(channel.get('pwrFactor', 0), 2)
                 freq = round(channel.get('freq', 0), 3)
                 if meterType == 'production':
-                    dev.updateStateOnServer(f'productionWatts{phase}', value=activePower)
+                    stateList.append({'key': f'productionWatts{phase}', 'value': activePower, 'uiValue': f'{activePower:.1f}'})
                 elif meterType == 'consumption':
-                    dev.updateStateOnServer(f'consumptionWatts{phase}', value=activePower)
-                # Voltage/current/apparent power - use production meter for these shared values
+                    stateList.append({'key': f'consumptionWatts{phase}', 'value': activePower, 'uiValue': f'{activePower:.1f}'})                # Voltage/current/apparent power - use production meter for these shared values
                 if meterType == 'production':
-                    dev.updateStateOnServer(f'voltage{phase}', value=voltage)
-                    dev.updateStateOnServer(f'current{phase}', value=current)
-                    dev.updateStateOnServer(f'apparentPower{phase}', value=apparentPower)
-                    dev.updateStateOnServer(f'powerFactor{phase}', value=pwrFactor)
-                    dev.updateStateOnServer(f'frequency{phase}', value=freq)
+                    stateList.append({'key': f'voltage{phase}', 'value': voltage, 'uiValue': f'{voltage:.1f}'})
+                    stateList.append({'key': f'current{phase}', 'value': current, 'uiValue': f'{current:.3f}'})
+                    stateList.append({'key': f'apparentPower{phase}', 'value': apparentPower, 'uiValue': f'{apparentPower:.1f}'})
+                    stateList.append({'key': f'powerFactor{phase}', 'value': pwrFactor, 'uiValue': f'{pwrFactor:.2f}'})
+                    stateList.append({'key': f'frequency{phase}', 'value': freq, 'uiValue': f'{freq:.3f}'})
             except Exception as error:
                 if self.debugLevel >= 2:
                     self.logger.debug(f"Error updating phase {phase} for {meterType}: {error}")
+            if stateList:
+                dev.updateStatesOnServer(stateList)
 
     def legacyParseStateValues(self, dev, results):
         """
@@ -2068,72 +2075,78 @@ class Plugin(indigo.PluginBase):
                  self.logger.exception("Saving Values Exception")
 
     def updateCostDevice(self, dev, costdev):
-        if self.debugLevel>=2:
+        if self.debugLevel >= 2:
             self.logger.debug(u'updateCostDevice Run')
         # get current Tarrif
         try:
             tariffkwhconsumption = float(costdev.pluginProps['envoyTariffkWhConsumption'])
             tariffkwhproduction = float(costdev.pluginProps['envoyTariffkWhProduction'])
         except Exception as error:
-            if self.debugLevel>=2:
-                self.logger.debug(u'error with Tarriff kwh,please update device settings. Defaulting to $1.0/kwh:' + str(error)   )
+            if self.debugLevel >= 2:
+                self.logger.debug(
+                    u'error with Tarriff kwh,please update device settings. Defaulting to $1.0/kwh:' + str(error))
             tariffkwhproduction = 1.0
             tariffkwhconsumption = 1.0
 
         try:
-            productionkwhToday = float(dev.states['productionWattsToday']/1000 )
-            productionTarrifToday = float(productionkwhToday * tariffkwhproduction)
-            costdev.updateStateOnServer('productionTarrifToday', value='${:,.2f}'.format(productionTarrifToday))
-            costdev.updateStateOnServer('productionkWToday',value=float(dev.states['productionWattsToday'])/1000)
+            productionkwhToday = round(float(dev.states['productionWattsToday']) / 1000, 3)
+            productionTarrifToday = round(productionkwhToday * tariffkwhproduction, 2)
 
-            consumptionkwhToday = float(dev.states['consumptionWattsToday']/1000 )
-            consumptionTarrifToday = float(consumptionkwhToday * tariffkwhconsumption)
-            costdev.updateStateOnServer('consumptionTarrifToday', value='${:,.2f}'.format(consumptionTarrifToday))
-            costdev.updateStateOnServer('consumptionkWToday', value=float(dev.states['consumptionWattsToday'])/1000)
+            consumptionkwhToday = round(float(dev.states['consumptionWattsToday']) / 1000, 3)
+            consumptionTarrifToday = round(consumptionkwhToday * tariffkwhconsumption, 2)
 
-            productionkwh7days = float(dev.states['production7days']/1000 )
-            productionTarrif7days = float(productionkwh7days * tariffkwhproduction)
-            costdev.updateStateOnServer('productionTarrif7days', value='${:,.2f}'.format(productionTarrif7days))
-            costdev.updateStateOnServer('productionkW7days', value=float(dev.states['production7days'])/1000)
+            productionkwh7days = round(float(dev.states['production7days']) / 1000, 3)
+            productionTarrif7days = round(productionkwh7days * tariffkwhproduction, 2)
 
-            consumptionkwh7days = float(dev.states['consumption7days']/1000 )
-            consumptionTarrif7days = float(consumptionkwh7days * tariffkwhconsumption)
-            costdev.updateStateOnServer('consumptionTarrif7days', value='${:,.2f}'.format(consumptionTarrif7days))
-            costdev.updateStateOnServer('consumptionkW7days', value=float(dev.states['consumption7days']/1000))
+            consumptionkwh7days = round(float(dev.states['consumption7days']) / 1000, 3)
+            consumptionTarrif7days = round(consumptionkwh7days * tariffkwhconsumption, 2)
 
-            productionkwhLifetime = float(dev.states['productionwhLifetime']/1000 )
-            productionTarrifLifetime = float(productionkwhLifetime * tariffkwhproduction)
-            costdev.updateStateOnServer('productionTarrifLifetime', value='${:,.2f}'.format(productionTarrifLifetime))
-            costdev.updateStateOnServer('productionkwhLifetime',value=float(productionkwhLifetime))
+            productionkwhLifetime = round(float(dev.states['productionwhLifetime']) / 1000, 3)
+            productionTarrifLifetime = round(productionkwhLifetime * tariffkwhproduction, 2)
 
-            consumptionkwhLifetime = float(dev.states['consumptionwhLifetime']/1000 )
-            consumptionTarrifLifetime = float(consumptionkwhLifetime * tariffkwhconsumption)
-            costdev.updateStateOnServer('consumptionTarrifLifetime', value='${:,.2f}'.format(consumptionTarrifLifetime))
-            costdev.updateStateOnServer('consumptionkwhLifetime', value=float(consumptionkwhLifetime))
+            consumptionkwhLifetime = round(float(dev.states['consumptionwhLifetime']) / 1000, 3)
+            consumptionTarrifLifetime = round(consumptionkwhLifetime * tariffkwhconsumption, 2)
 
-            netconsumptionkwhLifetime = float(dev.states['netconsumptionwhLifetime'] / 1000)
-            netconsumptionTarrifLifetime = float(netconsumptionkwhLifetime * tariffkwhconsumption)
-            costdev.updateStateOnServer('netconsumptionTarrifLifetime', value='${:,.2f}'.format(netconsumptionTarrifLifetime))
-            costdev.updateStateOnServer('netconsumptionkwhLifetime', value=float(netconsumptionkwhLifetime))
+            netconsumptionkwhLifetime = round(float(dev.states['netconsumptionwhLifetime']) / 1000, 3)
+            netconsumptionTarrifLifetime = round(netconsumptionkwhLifetime * tariffkwhconsumption, 2)
 
             # change to cost.
-            netTarrif7days = float (productionTarrif7days - consumptionTarrif7days)
-            netTarrifToday = float (productionTarrifToday - consumptionTarrifToday)
-            netkw7Days = float(productionkwh7days - consumptionkwh7days)
-            netkwToday = float(productionkwhToday-consumptionkwhToday)
-
-            costdev.updateStateOnServer('netkWToday', value=netkwToday)
-            costdev.updateStateOnServer('netkW7days', value=netkw7Days)
-
-            costdev.updateStateOnServer('netTarrifToday',  value='${:,.2f}'.format(netTarrifToday ))
-            costdev.updateStateOnServer('netTarrif7days', value='${:,.2f}'.format(netTarrif7days ))
+            netTarrif7days = round(productionTarrif7days - consumptionTarrif7days, 2)
+            netTarrifToday = round(productionTarrifToday - consumptionTarrifToday, 2)
+            netkw7Days = round(productionkwh7days - consumptionkwh7days, 3)
+            netkwToday = round(productionkwhToday - consumptionkwhToday, 3)
 
             update_time = t.strftime("%m/%d/%Y at %H:%M")
-            costdev.updateStateOnServer('deviceLastUpdated', value=update_time)
+
+            stateList = [
+                {'key': 'productionTarrifToday', 'value': '${:,.2f}'.format(productionTarrifToday)},
+                {'key': 'productionkWToday', 'value': productionkwhToday, 'uiValue': f'{productionkwhToday:.3f}'},
+                {'key': 'consumptionTarrifToday', 'value': '${:,.2f}'.format(consumptionTarrifToday)},
+                {'key': 'consumptionkWToday', 'value': consumptionkwhToday, 'uiValue': f'{consumptionkwhToday:.3f}'},
+                {'key': 'productionTarrif7days', 'value': '${:,.2f}'.format(productionTarrif7days)},
+                {'key': 'productionkW7days', 'value': productionkwh7days, 'uiValue': f'{productionkwh7days:.3f}'},
+                {'key': 'consumptionTarrif7days', 'value': '${:,.2f}'.format(consumptionTarrif7days)},
+                {'key': 'consumptionkW7days', 'value': consumptionkwh7days, 'uiValue': f'{consumptionkwh7days:.3f}'},
+                {'key': 'productionTarrifLifetime', 'value': '${:,.2f}'.format(productionTarrifLifetime)},
+                {'key': 'productionkwhLifetime', 'value': productionkwhLifetime,
+                 'uiValue': f'{productionkwhLifetime:.3f}'},
+                {'key': 'consumptionTarrifLifetime', 'value': '${:,.2f}'.format(consumptionTarrifLifetime)},
+                {'key': 'consumptionkwhLifetime', 'value': consumptionkwhLifetime,
+                 'uiValue': f'{consumptionkwhLifetime:.3f}'},
+                {'key': 'netconsumptionTarrifLifetime', 'value': '${:,.2f}'.format(netconsumptionTarrifLifetime)},
+                {'key': 'netconsumptionkwhLifetime', 'value': netconsumptionkwhLifetime,
+                 'uiValue': f'{netconsumptionkwhLifetime:.3f}'},
+                {'key': 'netkWToday', 'value': netkwToday, 'uiValue': f'{netkwToday:.3f}'},
+                {'key': 'netkW7days', 'value': netkw7Days, 'uiValue': f'{netkw7Days:.3f}'},
+                {'key': 'netTarrifToday', 'value': '${:,.2f}'.format(netTarrifToday)},
+                {'key': 'netTarrif7days', 'value': '${:,.2f}'.format(netTarrif7days)},
+                {'key': 'deviceLastUpdated', 'value': update_time},
+            ]
+            costdev.updateStatesOnServer(stateList)
             return
 
         except Exception as error:
-            self.logger.exception(u'Exception within Cost Device Calculation:'+str(error))
+            self.logger.exception(u'Exception within Cost Device Calculation:' + str(error))
             return
 
 
