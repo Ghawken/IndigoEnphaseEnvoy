@@ -2445,13 +2445,27 @@ class Plugin(indigo.PluginBase):
             payload = json.dumps({"tariff": tariffData})
             headers['Content-Type'] = 'application/json'
 
-            if self.debugLevel >= 2:
-                self.logger.debug(f"PUT {url}")
-
             host = urlsplit(url).netloc
+            is_new = host not in self.session_cache
             session = self.session_cache[host]
+
+            if self.debugLevel >= 2:
+                if is_new:
+                    self.logger.debug(f"[HTTP] Created NEW session {hex(id(session))} for host {host}")
+                else:
+                    self.logger.debug(f"[HTTP] Re-using session {hex(id(session))} for host {host}")
+                self.logger.debug(
+                    f"[HTTP] PUT {url}\n"
+                    f"       timeout={self.prefServerTimeout!r}\n"
+                    f"       headers={headers}\n"
+                    f"       cookies={session.cookies.get_dict()}"
+                )
+
             r = session.put(url, data=payload, headers=headers,
                             timeout=self.prefServerTimeout, allow_redirects=True)
+
+            if self.debugLevel >= 2:
+                self.logger.debug(f"[HTTP] {host} → {r.status_code}  (session {hex(id(session))})")
 
             if r.status_code == 200:
                 return True
@@ -2508,7 +2522,7 @@ class Plugin(indigo.PluginBase):
             tariffObj['storage_settings']['mode'] = mode
 
             if self._putTariffData(envoyDev, tariffObj):
-                indigo.server.log(f"Storage mode set to '{mode}' for {battDev.name}")
+                indigo.server.log(f"Storage mode successfully set to '{mode}' for {battDev.name}")
                 battDev.updateStateOnServer('storageMode', value=mode)
                 return True
             return False
@@ -2543,9 +2557,9 @@ class Plugin(indigo.PluginBase):
 
             tariffObj['storage_settings']['charge_from_grid'] = enable
 
-            action_label = "Enabling" if enable else "Disabling"
+            action_label = "Enabled" if enable else "Disabled"
             if self._putTariffData(envoyDev, tariffObj):
-                indigo.server.log(f"{action_label} charge from grid for {battDev.name}")
+                indigo.server.log(f"Successfully {action_label.lower()} charge from grid for {battDev.name}")
                 battDev.updateStateOnServer('chargeFromGrid', value=enable)
                 return True
             return False
@@ -2585,7 +2599,7 @@ class Plugin(indigo.PluginBase):
             tariffObj['storage_settings']['reserved_soc'] = round(float(value), 1)
 
             if self._putTariffData(envoyDev, tariffObj):
-                indigo.server.log(f"Reserve SOC set to {value}% for {battDev.name}")
+                indigo.server.log(f"Reserve SOC successfully set to {value}% for {battDev.name}")
                 battDev.updateStateOnServer('reserveSOC', value=value)
                 return True
             return False
