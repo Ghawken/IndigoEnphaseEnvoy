@@ -729,6 +729,16 @@
   <Device type="custom" id="EnphaseEnvoyBatteryDevice">
     <Name>Enphase Battery &amp; Grid</Name>
 
+    <ConfigUI>
+      <Field id="batteryInfo" type="label">
+        <Label>This device aggregates all Enphase batteries and shows grid import/export data.
+It requires an enabled Enphase Envoy-S device to retrieve data from.</Label>
+      </Field>
+      <Field id="deviceConfigured" type="textfield" hidden="true" defaultValue="true">
+        <Label/>
+      </Field>
+    </ConfigUI>
+
     <States>
       <State id="deviceIsOnline">
         <ValueType>Boolean</ValueType>
