@@ -2374,7 +2374,7 @@ class Plugin(indigo.PluginBase):
 
     def refreshBatteryDataAction(self, pluginAction):
         """Action callback: Refresh Battery & Grid Data for selected battery device."""
-        battDev = pluginAction.device
+        battDev = indigo.devices[pluginAction.deviceId]
         if self.debugLevel >= 2:
             self.logger.debug(f"refreshBatteryDataAction called for {battDev.name}")
         # Find the parent EnphaseEnvoyDevice to pull data from
@@ -2598,37 +2598,37 @@ class Plugin(indigo.PluginBase):
 
     def setStorageModeSelfConsumptionAction(self, pluginAction):
         """Action callback: Set storage mode to self-consumption."""
-        battDev = pluginAction.device
+        battDev = indigo.devices[pluginAction.deviceId]
         self.logger.info(f"Setting storage mode to self-consumption for {battDev.name}")
         self._setStorageMode(battDev, 'self-consumption')
 
     def setStorageModeSavingsAction(self, pluginAction):
         """Action callback: Set storage mode to savings."""
-        battDev = pluginAction.device
+        battDev = indigo.devices[pluginAction.deviceId]
         self.logger.info(f"Setting storage mode to savings for {battDev.name}")
         self._setStorageMode(battDev, 'savings')
 
     def setStorageModeFullBackupAction(self, pluginAction):
         """Action callback: Set storage mode to full backup."""
-        battDev = pluginAction.device
+        battDev = indigo.devices[pluginAction.deviceId]
         self.logger.info(f"Setting storage mode to full backup for {battDev.name}")
         self._setStorageMode(battDev, 'backup')
 
     def enableChargeFromGridAction(self, pluginAction):
         """Action callback: Enable charge from grid."""
-        battDev = pluginAction.device
+        battDev = indigo.devices[pluginAction.deviceId]
         self.logger.info(f"Enabling charge from grid for {battDev.name}")
         self._setChargeFromGrid(battDev, True)
 
     def disableChargeFromGridAction(self, pluginAction):
         """Action callback: Disable charge from grid."""
-        battDev = pluginAction.device
+        battDev = indigo.devices[pluginAction.deviceId]
         self.logger.info(f"Disabling charge from grid for {battDev.name}")
         self._setChargeFromGrid(battDev, False)
 
     def setReserveSOCAction(self, pluginAction):
         """Action callback: Set battery reserve SOC percentage."""
-        battDev = pluginAction.device
+        battDev = indigo.devices[pluginAction.deviceId]
         try:
             reservePercent = int(pluginAction.props.get('reservePercent', 20))
         except (ValueError, TypeError):
