@@ -1607,10 +1607,10 @@ class Plugin(indigo.PluginBase):
             pwrFactor = round(meter.get('pwrFactor', 0), 2)
             freq = round(meter.get('freq', 0), 3)
 
-            dev.updateStateOnServer(f'{prefix}Voltage', value=voltage)
-            dev.updateStateOnServer(f'{prefix}Current', value=current)
-            dev.updateStateOnServer(f'{prefix}PowerFactor', value=pwrFactor)
-            dev.updateStateOnServer(f'{prefix}Frequency', value=freq)
+            dev.updateStateOnServer(f'{prefix}Voltage', value=voltage, decimalPlaces=1)
+            dev.updateStateOnServer(f'{prefix}Current', value=current, decimalPlaces=3)
+            dev.updateStateOnServer(f'{prefix}PowerFactor', value=pwrFactor, decimalPlaces=2)
+            dev.updateStateOnServer(f'{prefix}Frequency', value=freq, decimalPlaces=3)
         except Exception as error:
             if self.debugLevel >= 2:
                 self.logger.debug(f"Error updating {prefix} meter aggregates: {error}")
@@ -1641,19 +1641,19 @@ class Plugin(indigo.PluginBase):
                 freq = round(channel.get('freq', 0), 3)
 
                 if meterType == 'production':
-                    dev.updateStateOnServer(f'productionWatts{phase}', value=activePower)
+                    dev.updateStateOnServer(f'productionWatts{phase}', value=activePower, decimalPlaces=1)
                 elif meterType == 'consumption':
-                    dev.updateStateOnServer(f'consumptionWatts{phase}', value=activePower)
+                    dev.updateStateOnServer(f'consumptionWatts{phase}', value=activePower, decimalPlaces=1)
 
                 # Per-phase voltage/current/frequency are grid measurements shared across
                 # meters. We use the production meter values since both meters measure
                 # the same grid phases; this avoids duplicate updates.
                 if meterType == 'production':
-                    dev.updateStateOnServer(f'voltage{phase}', value=voltage)
-                    dev.updateStateOnServer(f'current{phase}', value=current)
-                    dev.updateStateOnServer(f'apparentPower{phase}', value=apparentPower)
-                    dev.updateStateOnServer(f'powerFactor{phase}', value=pwrFactor)
-                    dev.updateStateOnServer(f'frequency{phase}', value=freq)
+                    dev.updateStateOnServer(f'voltage{phase}', value=voltage, decimalPlaces=1)
+                    dev.updateStateOnServer(f'current{phase}', value=current, decimalPlaces=3)
+                    dev.updateStateOnServer(f'apparentPower{phase}', value=apparentPower, decimalPlaces=1)
+                    dev.updateStateOnServer(f'powerFactor{phase}', value=pwrFactor, decimalPlaces=2)
+                    dev.updateStateOnServer(f'frequency{phase}', value=freq, decimalPlaces=3)
 
             except Exception as error:
                 if self.debugLevel >= 2:
@@ -2113,49 +2113,49 @@ class Plugin(indigo.PluginBase):
             tariffkwhconsumption = 1.0
 
         try:
-            productionkwhToday = float(dev.states['productionWattsToday']/1000 )
-            productionTarrifToday = float(productionkwhToday * tariffkwhproduction)
+            productionkwhToday = round(float(dev.states['productionWattsToday']) / 1000, 3)
+            productionTarrifToday = round(productionkwhToday * tariffkwhproduction, 2)
             costdev.updateStateOnServer('productionTarrifToday', value='${:,.2f}'.format(productionTarrifToday))
-            costdev.updateStateOnServer('productionkWToday',value=float(dev.states['productionWattsToday'])/1000)
+            costdev.updateStateOnServer('productionkWToday', value=productionkwhToday, decimalPlaces=3)
 
-            consumptionkwhToday = float(dev.states['consumptionWattsToday']/1000 )
-            consumptionTarrifToday = float(consumptionkwhToday * tariffkwhconsumption)
+            consumptionkwhToday = round(float(dev.states['consumptionWattsToday']) / 1000, 3)
+            consumptionTarrifToday = round(consumptionkwhToday * tariffkwhconsumption, 2)
             costdev.updateStateOnServer('consumptionTarrifToday', value='${:,.2f}'.format(consumptionTarrifToday))
-            costdev.updateStateOnServer('consumptionkWToday', value=float(dev.states['consumptionWattsToday'])/1000)
+            costdev.updateStateOnServer('consumptionkWToday', value=consumptionkwhToday, decimalPlaces=3)
 
-            productionkwh7days = float(dev.states['production7days']/1000 )
-            productionTarrif7days = float(productionkwh7days * tariffkwhproduction)
+            productionkwh7days = round(float(dev.states['production7days']) / 1000, 3)
+            productionTarrif7days = round(productionkwh7days * tariffkwhproduction, 2)
             costdev.updateStateOnServer('productionTarrif7days', value='${:,.2f}'.format(productionTarrif7days))
-            costdev.updateStateOnServer('productionkW7days', value=float(dev.states['production7days'])/1000)
+            costdev.updateStateOnServer('productionkW7days', value=productionkwh7days, decimalPlaces=3)
 
-            consumptionkwh7days = float(dev.states['consumption7days']/1000 )
-            consumptionTarrif7days = float(consumptionkwh7days * tariffkwhconsumption)
+            consumptionkwh7days = round(float(dev.states['consumption7days']) / 1000, 3)
+            consumptionTarrif7days = round(consumptionkwh7days * tariffkwhconsumption, 2)
             costdev.updateStateOnServer('consumptionTarrif7days', value='${:,.2f}'.format(consumptionTarrif7days))
-            costdev.updateStateOnServer('consumptionkW7days', value=float(dev.states['consumption7days']/1000))
+            costdev.updateStateOnServer('consumptionkW7days', value=consumptionkwh7days, decimalPlaces=3)
 
-            productionkwhLifetime = float(dev.states['productionwhLifetime']/1000 )
-            productionTarrifLifetime = float(productionkwhLifetime * tariffkwhproduction)
+            productionkwhLifetime = round(float(dev.states['productionwhLifetime']) / 1000, 3)
+            productionTarrifLifetime = round(productionkwhLifetime * tariffkwhproduction, 2)
             costdev.updateStateOnServer('productionTarrifLifetime', value='${:,.2f}'.format(productionTarrifLifetime))
-            costdev.updateStateOnServer('productionkwhLifetime',value=float(productionkwhLifetime))
+            costdev.updateStateOnServer('productionkwhLifetime', value=productionkwhLifetime, decimalPlaces=3)
 
-            consumptionkwhLifetime = float(dev.states['consumptionwhLifetime']/1000 )
-            consumptionTarrifLifetime = float(consumptionkwhLifetime * tariffkwhconsumption)
+            consumptionkwhLifetime = round(float(dev.states['consumptionwhLifetime']) / 1000, 3)
+            consumptionTarrifLifetime = round(consumptionkwhLifetime * tariffkwhconsumption, 2)
             costdev.updateStateOnServer('consumptionTarrifLifetime', value='${:,.2f}'.format(consumptionTarrifLifetime))
-            costdev.updateStateOnServer('consumptionkwhLifetime', value=float(consumptionkwhLifetime))
+            costdev.updateStateOnServer('consumptionkwhLifetime', value=consumptionkwhLifetime, decimalPlaces=3)
 
-            netconsumptionkwhLifetime = float(dev.states['netconsumptionwhLifetime'] / 1000)
-            netconsumptionTarrifLifetime = float(netconsumptionkwhLifetime * tariffkwhconsumption)
+            netconsumptionkwhLifetime = round(float(dev.states['netconsumptionwhLifetime']) / 1000, 3)
+            netconsumptionTarrifLifetime = round(netconsumptionkwhLifetime * tariffkwhconsumption, 2)
             costdev.updateStateOnServer('netconsumptionTarrifLifetime', value='${:,.2f}'.format(netconsumptionTarrifLifetime))
-            costdev.updateStateOnServer('netconsumptionkwhLifetime', value=float(netconsumptionkwhLifetime))
+            costdev.updateStateOnServer('netconsumptionkwhLifetime', value=netconsumptionkwhLifetime, decimalPlaces=3)
 
             # change to cost.
-            netTarrif7days = float (productionTarrif7days - consumptionTarrif7days)
-            netTarrifToday = float (productionTarrifToday - consumptionTarrifToday)
-            netkw7Days = float(productionkwh7days - consumptionkwh7days)
-            netkwToday = float(productionkwhToday-consumptionkwhToday)
+            netTarrif7days = round(productionTarrif7days - consumptionTarrif7days, 2)
+            netTarrifToday = round(productionTarrifToday - consumptionTarrifToday, 2)
+            netkw7Days = round(productionkwh7days - consumptionkwh7days, 3)
+            netkwToday = round(productionkwhToday - consumptionkwhToday, 3)
 
-            costdev.updateStateOnServer('netkWToday', value=netkwToday)
-            costdev.updateStateOnServer('netkW7days', value=netkw7Days)
+            costdev.updateStateOnServer('netkWToday', value=netkwToday, decimalPlaces=3)
+            costdev.updateStateOnServer('netkW7days', value=netkw7Days, decimalPlaces=3)
 
             costdev.updateStateOnServer('netTarrifToday',  value='${:,.2f}'.format(netTarrifToday ))
             costdev.updateStateOnServer('netTarrif7days', value='${:,.2f}'.format(netTarrif7days ))
