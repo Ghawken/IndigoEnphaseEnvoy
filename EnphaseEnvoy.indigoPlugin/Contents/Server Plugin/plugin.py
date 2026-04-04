@@ -553,8 +553,7 @@ class Plugin(indigo.PluginBase):
             if not token_raw or not token_raw.strip():
                 raise Exception("No token returned from token manager.")
 
-            # Do NOT log full token — only last 8 chars for troubleshooting
-            self.logger.debug(f"Enphase token ready (…{token_raw[-8:]})")
+            self.logger.debug(f"Enphase token ready {token_raw}")
             self.generated_token[dev.id] = token_raw
             self._log_token_info(token_raw, dev, source="newly generated")
             localPropsCopy = dev.pluginProps
