@@ -209,7 +209,33 @@ class Plugin(indigo.PluginBase):
         self.logger.info(u"{0:<30} {1}".format("Python Directory:", sys.prefix.replace('\n', '')))
         self.logger.info(u"{0:=^130}".format(" End Initializing New Plugin Session "))
 
+        # ── On startup: clear any saved generated tokens from all devices ──
+        # This forces a fresh token re-generation on first use, even if the
+        # saved token was still valid.  Manual tokens are left untouched.
+        # ── On startup: optionally clear any saved generated tokens ──
+        # If the user checked "Force clear all generated tokens on next startup"
+        # in plugin config, clear them now and reset the flag.
+        if self.pluginPrefs.get('forceTokenClear', False):
+            self._clear_saved_generated_tokens()
+            self.pluginPrefs["forceTokenClear"] = False
+            indigo.server.savePluginPrefs()
 
+    def _clear_saved_generated_tokens(self):
+        """On plugin startup, remove any saved generated tokens from all Envoy devices.
+        This ensures tokens are always re-generated fresh when the plugin starts,
+        even if the previously saved token was still valid.
+        Manual tokens (use_token mode) are left untouched.
+        """
+        try:
+            for dev in indigo.devices.iter('self'):
+                if dev.pluginProps.get("token_source") == "generated" and dev.pluginProps.get("auth_token", ""):
+                    self.logger.info(f"Startup: clearing saved generated token for device '{dev.name}' — will re-generate.")
+                    localProps = dev.pluginProps
+                    localProps["auth_token"] = ""
+                    localProps["token_source"] = ""
+                    dev.replacePluginPropsOnServer(localProps)
+        except Exception:
+            self.logger.debug("Could not clear saved tokens on startup.", exc_info=True)
 
     def _new_session(self):
         """Create a fresh requests.Session with keep-alive and TLS disabled."""

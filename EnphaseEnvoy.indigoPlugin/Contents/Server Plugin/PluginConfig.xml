@@ -8,25 +8,31 @@
     <Label>Developed by: GlennNZ</Label>
   </Field>
   <Field id="sep7" type="separator"/>
-
-  <Field id="space1" type="label" fontColor="black">
+ <Field id="tokenLabel" type="label" fontColor="black">
+    <Label>Token Management:</Label>
+  </Field>
+  <Field id="forceTokenClear" type="checkbox" defaultValue="false" tooltip="Check this to clear all saved generated tokens on next plugin startup. The setting resets automatically after tokens are cleared.">
+    <Label> </Label>
+    <Description>Force clear all generated tokens on next startup</Description>
+  </Field>
+  <Field id="space1" type="label" hidden="True" fontColor="black">
     <Label>Check for Updates:</Label>
   </Field>
   <Field id="sep6" type="separator"/>
-  <Field id="space2" type="label" fontSize="small" fontColor="black">
+  <Field id="space2" type="label" hidden="True" fontSize="small" fontColor="black">
     <Label>The amount of time that the plugin will wait between checking for updated version</Label>
   </Field>
 
-  <Field id="configUpdaterInterval" type="textfield" defaultValue="24" tooltip="Select preference for how often updates will be checked">
+  <Field id="configUpdaterInterval" hidden="True" type="textfield" defaultValue="24" tooltip="Select preference for how often updates will be checked">
     <Label>Update Check Interval:(hours)</Label>
   </Field>
 
-    <Field id="openStore" type="checkbox" tooltip="Will automatic install newer version at check.">
+    <Field id="openStore" type="checkbox" tooltip="Will automatic install newer version at check." hidden="True">
     <Label> Open PluginStore if newer version at time of check</Label>
     <Description>Enable/Disable</Description>
   </Field>
 
- <Field id="sep9" type="separator"/>
+ <Field hidden="True" id="sep9" type="separator"/>
 
   <Field id="space10" type="label" alignText="left">
     <Label>Debugging:</Label>
