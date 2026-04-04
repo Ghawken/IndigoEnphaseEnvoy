@@ -1451,6 +1451,8 @@ class Plugin(indigo.PluginBase):
             self.logger.debug(f"\n Using URL {url}\n Cookies: {session.cookies.get_dict()}\n Headers {headers}")
             r = self._get( url, headers=headers)
             #r = self.session.get(url, timeout=35, headers=headers, verify=False, allow_redirects=True)
+            if r.status_code != 200:
+                raise Exception(f"HTTP {r.status_code} from {url}")
             result = r.json()
             self.logger.debug(f"Result:{result}")
 
@@ -1483,6 +1485,8 @@ class Plugin(indigo.PluginBase):
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production"
             r = self._get( url, headers=headers)
             #r = self.session.get(url,timeout=15 ,headers=headers,verify=False,  allow_redirects=True)
+            if r.status_code != 200:
+                raise Exception(f"HTTP {r.status_code} from {url}")
             result = r.json()
             if self.debugLevel >= 2:
                 self.logger.debug(u"Result:" + str(result))
@@ -1518,6 +1522,8 @@ class Plugin(indigo.PluginBase):
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/consumption"
             r = self._get( url, headers=headers)
             #r = self.session.get(url,timeout=15, verify=False,  headers=headers, allow_redirects=True)
+            if r.status_code != 200:
+                raise Exception(f"HTTP {r.status_code} from {url}")
             result = r.json()
             if self.debugLevel >= 2:
                 self.logger.debug(u"Result:" + str(result))
@@ -1627,6 +1633,8 @@ class Plugin(indigo.PluginBase):
             url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/inventory.json"
             r = self._get(url, timeout=35,  headers=headers)
             #r = self.session.get(url, timeout=35, verify=False, headers=headers,allow_redirects=True)
+            if r.status_code != 200:
+                raise Exception(f"HTTP {r.status_code} from {url}")
             result = r.json()
             if self.debug:
                 self.logger.debug(u"Inventory Result:" + str(result))
@@ -1666,6 +1674,9 @@ class Plugin(indigo.PluginBase):
                     auth = HTTPDigestAuth('envoy', self.serial_number_last_six)
                     r = self._get( url, timeout=34, headers=headers, auth=auth)
                     #r = self.session.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
+
+                if r.status_code != 200:
+                    raise Exception(f"HTTP {r.status_code} from {url}")
                 result = r.json()
                 if self.debugLevel >= 2:
                     self.logger.debug(f"Inverter Result:{result}")
