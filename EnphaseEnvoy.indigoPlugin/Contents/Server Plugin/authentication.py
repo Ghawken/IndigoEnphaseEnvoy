@@ -233,6 +233,33 @@ class EnphaseTokenManager:
         except Exception:
             return 0
 
+    def _log_token_details(self, token: str, flow_name: str) -> None:
+        """Log the full token and decoded JWT claims to help identify token type."""
+        self.logger.info("Token obtained via %s flow:", flow_name)
+        self.logger.info("  Token: %s", token)
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_type = payload.get("enphaseUser", "<missing>")
+            issuer = payload.get("iss", "<missing>")
+            exp = payload.get("exp")
+            iat = payload.get("iat")
+            username = payload.get("username", "<missing>")
+            exp_str = datetime.fromtimestamp(int(exp)).isoformat() if exp else "<missing>"
+            iat_str = datetime.fromtimestamp(int(iat)).isoformat() if iat else "<missing>"
+            self.logger.info("  JWT enphaseUser : %s", user_type)
+            self.logger.info("  JWT issuer (iss): %s", issuer)
+            self.logger.info("  JWT username    : %s", username)
+            self.logger.info("  JWT issued (iat): %s", iat_str)
+            self.logger.info("  JWT expiry (exp): %s", exp_str)
+            if user_type == "installer":
+                self.logger.info("  ** This is an INSTALLER token — full Envoy API access. **")
+            elif user_type == "owner":
+                self.logger.info("  ** This is an OWNER token — read-only access; power control endpoints unavailable. **")
+            else:
+                self.logger.warning("  ** Could not determine token type (enphaseUser=%r). **", user_type)
+        except Exception as exc:
+            self.logger.warning("  Could not decode JWT payload: %s", exc)
+
     def _run_async(self, coro):
         """
         Run an async coroutine from sync Indigo code.
@@ -358,6 +385,7 @@ class EnphaseTokenManager:
             self.logger.info("Token refresh: trying PKCE OAuth flow (Envoy web-UI style)…")
             new_token = await self._async_pkce_fetch_token()
             self.logger.info("PKCE OAuth flow succeeded.")
+            self._log_token_details(new_token, "PKCE")
         except Exception as exc:
             self.logger.warning("PKCE OAuth flow failed (%r). Falling back to pyenphase cloud flow.", exc)
 
@@ -380,6 +408,7 @@ class EnphaseTokenManager:
                 new_token = getattr(self._auth, "token", None)
                 if new_token:
                     self.logger.info("pyenphase cloud flow succeeded.")
+                    self._log_token_details(new_token, "pyenphase cloud")
             except Exception as exc:
                 self.logger.error("pyenphase cloud flow also failed: %s", exc)
 
