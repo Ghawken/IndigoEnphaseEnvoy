@@ -190,8 +190,8 @@ class Plugin(indigo.PluginBase):
         self.WaitInterval = 0
         self.endpoint_type = ""
         self.endpoint_url = ""
-        self.generated_token = {}  # dev.id -> token string
-        self.force_token_refresh = set()  # dev.id values that need a forced token re-generation on startup
+        self.generated_token = {}  # dev.id -> token string (empty on startup → forces re-generation)
+        self._startup_force_token_regen = True  # on startup, force re-generation for all devices even if saved token is valid
 
         self.using_token = False
 
@@ -385,8 +385,6 @@ class Plugin(indigo.PluginBase):
 
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
-        self.generated_token.pop(dev.id, None)
-        self.force_token_refresh.add(dev.id)  # force re-generation even if saved token is valid
         self.log_manual_expiry = True
         self.force_update.add(dev.id)
 
@@ -1072,7 +1070,8 @@ class Plugin(indigo.PluginBase):
             # Only trust saved auth_token if it was actually generated (not a leftover manual token)
             token_source = dev.pluginProps.get("token_source", "")
             saved_is_generated = (token_source == "generated")
-            force_refresh = dev.id in self.force_token_refresh
+            # On plugin startup, generated_token is empty for all devices → force re-generation
+            force_refresh = self._startup_force_token_regen and self.generated_token.get(dev.id, "") == ""
 
             # Startup: only when we haven't loaded token into memory yet
             if self.generated_token.get(dev.id, "") == "":
@@ -1107,7 +1106,6 @@ class Plugin(indigo.PluginBase):
                 self.logger.error("To Generate a token you must enter password in device edit settings for enphase")
                 return headers
             if force_refresh or (not self.generated_token.get(dev.id, "")) or self._is_enphase_token_expired(self.generated_token[dev.id]):
-                self.force_token_refresh.discard(dev.id)  # clear the flag after attempting
                 self.get_enphasetoken(username, password, self.serial_number_full.get(dev.id,""), dev)
                 # (optional but safe) reload in case get_enphasetoken saved to pluginProps
                 self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id,"")
