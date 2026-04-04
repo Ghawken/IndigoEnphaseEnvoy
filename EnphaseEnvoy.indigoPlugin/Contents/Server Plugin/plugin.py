@@ -1083,8 +1083,6 @@ class Plugin(indigo.PluginBase):
                     except Exception:
                         self.logger.debug("Saved token found, but could not parse expiry.", exc_info=True)
                 else:
-                    self.logger.info(
-                        "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
                     if not saved_is_generated and dev.pluginProps.get("auth_token", ""):
                         self.logger.info(
                             "Ignoring saved token — it was from manual entry, not generated. Will generate a fresh token.")
