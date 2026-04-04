@@ -553,8 +553,8 @@ class Plugin(indigo.PluginBase):
             if not token_raw or not token_raw.strip():
                 raise Exception("No token returned from token manager.")
 
-            # 6) Do NOT log full token
-            self.logger.debug(f"Enphase token ready {token_raw})")
+            # Do NOT log full token — only last 8 chars for troubleshooting
+            self.logger.debug(f"Enphase token ready (…{token_raw[-8:]})")
             self.generated_token[dev.id] = token_raw
             self._log_token_info(token_raw, dev, source="newly generated")
             localPropsCopy = dev.pluginProps
@@ -1083,8 +1083,6 @@ class Plugin(indigo.PluginBase):
                     except Exception:
                         self.logger.debug("Saved token found, but could not parse expiry.", exc_info=True)
                 else:
-                    self.logger.info(
-                        "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
                     if not saved_is_generated and dev.pluginProps.get("auth_token", ""):
                         self.logger.info(
                             "Ignoring saved token — it was from manual entry, not generated. Will generate a fresh token.")
