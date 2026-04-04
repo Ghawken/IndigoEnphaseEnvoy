@@ -371,12 +371,6 @@ class Plugin(indigo.PluginBase):
             self.debugupdate = valuesDict.get('debugupdate', False)
             self.openStore = valuesDict.get('openStore', False)
 
-            # If user checked "Force clear all generated tokens", run now and reset
-            if valuesDict.get('forceTokenClear', False):
-                self._clear_saved_generated_tokens()
-                self.pluginPrefs["forceTokenClear"] = False
-                indigo.server.savePluginPrefs()
-
             if self.debug:
                 indigo.server.log(u"Debugging on (Level: {0})".format(self.debugLevel))
             else:
