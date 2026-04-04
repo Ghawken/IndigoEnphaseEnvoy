@@ -72,4 +72,13 @@
         </List>
     </Field>
 
+  <Field id="sep10" type="separator"/>
+  <Field id="tokenLabel" type="label" fontColor="black">
+    <Label>Token Management:</Label>
+  </Field>
+  <Field id="forceTokenClear" type="checkbox" defaultValue="false" tooltip="Check this to clear all saved generated tokens on next plugin startup. The setting resets automatically after tokens are cleared.">
+    <Label> </Label>
+    <Description>Force clear all generated tokens on next startup</Description>
+  </Field>
+
 </PluginConfig>

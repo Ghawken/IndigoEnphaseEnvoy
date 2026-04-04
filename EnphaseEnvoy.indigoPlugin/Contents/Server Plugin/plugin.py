@@ -209,17 +209,21 @@ class Plugin(indigo.PluginBase):
         self.logger.info(u"{0:<30} {1}".format("Python Directory:", sys.prefix.replace('\n', '')))
         self.logger.info(u"{0:=^130}".format(" End Initializing New Plugin Session "))
 
-        # ── On startup: clear any saved generated tokens from all devices ──
-        # This forces a fresh token re-generation on first use, even if the
-        # saved token was still valid.  Manual tokens are left untouched.
-        self._clear_saved_generated_tokens()
+        # ── On startup: optionally clear any saved generated tokens ──
+        # If the user checked "Force clear all generated tokens on next startup"
+        # in plugin config, clear them now and reset the flag.
+        if self.pluginPrefs.get('forceTokenClear', False):
+            self._clear_saved_generated_tokens()
+            self.pluginPrefs["forceTokenClear"] = False
+            indigo.server.savePluginPrefs()
 
 
     def _clear_saved_generated_tokens(self):
-        """On plugin startup, remove any saved generated tokens from all Envoy devices.
+        """Remove any saved generated tokens from all Envoy devices.
 
-        This ensures tokens are always re-generated fresh when the plugin starts,
-        even if the previously saved token was still valid.
+        Called when the user enables 'Force clear all generated tokens' in
+        plugin config.  Clears auth_token / token_source from pluginProps so
+        tokens are re-generated fresh on next use.
         Manual tokens (use_token mode) are left untouched.
         """
         try:
@@ -366,6 +370,12 @@ class Plugin(indigo.PluginBase):
             indigo.server.savePluginPrefs()
             self.debugupdate = valuesDict.get('debugupdate', False)
             self.openStore = valuesDict.get('openStore', False)
+
+            # If user checked "Force clear all generated tokens", run now and reset
+            if valuesDict.get('forceTokenClear', False):
+                self._clear_saved_generated_tokens()
+                self.pluginPrefs["forceTokenClear"] = False
+                indigo.server.savePluginPrefs()
 
             if self.debug:
                 indigo.server.log(u"Debugging on (Level: {0})".format(self.debugLevel))
