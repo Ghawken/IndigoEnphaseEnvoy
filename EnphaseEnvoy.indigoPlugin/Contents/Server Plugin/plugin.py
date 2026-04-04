@@ -190,8 +190,7 @@ class Plugin(indigo.PluginBase):
         self.WaitInterval = 0
         self.endpoint_type = ""
         self.endpoint_url = ""
-        self.generated_token = {}  # dev.id -> token string (empty on startup → forces re-generation)
-        self._startup_force_token_regen = True  # on startup, force re-generation for all devices even if saved token is valid
+        self.generated_token = {}  # dev.id -> token string
 
         self.using_token = False
 
@@ -210,7 +209,29 @@ class Plugin(indigo.PluginBase):
         self.logger.info(u"{0:<30} {1}".format("Python Directory:", sys.prefix.replace('\n', '')))
         self.logger.info(u"{0:=^130}".format(" End Initializing New Plugin Session "))
 
+        # ── On startup: clear any saved generated tokens from all devices ──
+        # This forces a fresh token re-generation on first use, even if the
+        # saved token was still valid.  Manual tokens are left untouched.
+        self._clear_saved_generated_tokens()
 
+
+    def _clear_saved_generated_tokens(self):
+        """On plugin startup, remove any saved generated tokens from all Envoy devices.
+
+        This ensures tokens are always re-generated fresh when the plugin starts,
+        even if the previously saved token was still valid.
+        Manual tokens (use_token mode) are left untouched.
+        """
+        try:
+            for dev in indigo.devices.iter('self'):
+                if dev.pluginProps.get("token_source") == "generated" and dev.pluginProps.get("auth_token", ""):
+                    self.logger.info(f"Startup: clearing saved generated token for device '{dev.name}' — will re-generate.")
+                    localProps = dev.pluginProps
+                    localProps["auth_token"] = ""
+                    localProps["token_source"] = ""
+                    dev.replacePluginPropsOnServer(localProps)
+        except Exception:
+            self.logger.debug("Could not clear saved tokens on startup.", exc_info=True)
 
     def _new_session(self):
         """Create a fresh requests.Session with keep-alive and TLS disabled."""
@@ -385,6 +406,7 @@ class Plugin(indigo.PluginBase):
 
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
+        self.generated_token.pop(dev.id, None)
         self.log_manual_expiry = True
         self.force_update.add(dev.id)
 
@@ -1070,33 +1092,27 @@ class Plugin(indigo.PluginBase):
             # Only trust saved auth_token if it was actually generated (not a leftover manual token)
             token_source = dev.pluginProps.get("token_source", "")
             saved_is_generated = (token_source == "generated")
-            # On plugin startup, generated_token is empty for all devices → force re-generation
-            force_refresh = self._startup_force_token_regen and self.generated_token.get(dev.id, "") == ""
-
             # Startup: only when we haven't loaded token into memory yet
             if self.generated_token.get(dev.id, "") == "":
-                if force_refresh:
-                    self.logger.info("Plugin startup: forcing token re-generation (ignoring any saved token).")
-                elif saved_is_generated:
-                    saved = dev.pluginProps.get("auth_token", "")
-                    if saved:
-                        try:
-                            self._log_token_info(saved, dev, source="saved/cached")
-                            exp = self._get_enphase_token_expiry(saved)
-                            dev.updateStateOnServer("token_expires",
-                                                    f"{datetime.datetime.fromtimestamp(exp).strftime('%c') if exp else 'unknown'}")
-                        except Exception:
-                            self.logger.debug("Saved token found, but could not parse expiry.", exc_info=True)
+                saved = dev.pluginProps.get("auth_token", "") if saved_is_generated else ""
+                if saved:
+                    try:
+                        self._log_token_info(saved, dev, source="saved/cached")
+                        exp = self._get_enphase_token_expiry(saved)
+                        dev.updateStateOnServer("token_expires",
+                                                f"{datetime.datetime.fromtimestamp(exp).strftime('%c') if exp else 'unknown'}")
+                    except Exception:
+                        self.logger.debug("Saved token found, but could not parse expiry.", exc_info=True)
                 else:
-                    if dev.pluginProps.get("auth_token", ""):
+                    if not saved_is_generated and dev.pluginProps.get("auth_token", ""):
                         self.logger.info(
                             "Ignoring saved token — it was from manual entry, not generated. Will generate a fresh token.")
                     else:
                         self.logger.info(
                             "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
 
-            # Load token into runtime cache (after the one-time log) — skip if forcing refresh
-            if saved_is_generated and not force_refresh:
+            # Load token into runtime cache (after the one-time log)
+            if saved_is_generated:
                 self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id, "")
 
             if username == "":
@@ -1105,7 +1121,7 @@ class Plugin(indigo.PluginBase):
             if password == "":
                 self.logger.error("To Generate a token you must enter password in device edit settings for enphase")
                 return headers
-            if force_refresh or (not self.generated_token.get(dev.id, "")) or self._is_enphase_token_expired(self.generated_token[dev.id]):
+            if (not self.generated_token.get(dev.id, "")) or self._is_enphase_token_expired(self.generated_token[dev.id]):
                 self.get_enphasetoken(username, password, self.serial_number_full.get(dev.id,""), dev)
                 # (optional but safe) reload in case get_enphasetoken saved to pluginProps
                 self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id,"")
