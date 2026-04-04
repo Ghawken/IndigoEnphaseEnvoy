@@ -331,7 +331,7 @@ class EnphaseTokenManager:
             envoy_connector = aiohttp.TCPConnector(ssl=NO_VERIFY_SSL_CONTEXT)
             async with aiohttp.ClientSession(
                 connector=envoy_connector,
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=self.timeout_seconds),
             ) as envoy_client:
                 async with envoy_client.post(
                     ENDPOINT_URL_GET_JWT.format(self.host),
@@ -359,7 +359,7 @@ class EnphaseTokenManager:
             new_token = await self._async_pkce_fetch_token()
             self.logger.info("PKCE OAuth flow succeeded.")
         except Exception as exc:
-            self.logger.warning("PKCE OAuth flow failed (%s). Falling back to pyenphase cloud flow.", exc)
+            self.logger.warning("PKCE OAuth flow failed (%r). Falling back to pyenphase cloud flow.", exc)
 
         # ── Attempt 2: pyenphase cloud (original) ──
         if not new_token:
