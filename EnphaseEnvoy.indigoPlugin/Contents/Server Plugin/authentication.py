@@ -3,34 +3,71 @@
 # -*- coding: utf-8 -*-
 
 """
-Indigo Enphase Token Authorisation (pyenphase-based)
+Indigo Enphase Token Authorisation
 
-This module provides a small, sync-friendly wrapper around pyenphase EnvoyTokenAuth
-(the same token auth strategy Home Assistant uses).
+Supports two token-acquisition strategies:
 
-You get:
+  1. **PKCE OAuth flow** (preferred — from vincentwolsink HA installer integration)
+     Mimics the Envoy web-UI login via ``entrez.enphaseenergy.com/login`` →
+     local Envoy ``/auth/get_jwt``.  The *Envoy itself* mints the JWT so the
+     ``enphaseUser`` claim correctly reflects the account type (installer vs owner).
+
+  2. **pyenphase cloud flow** (fallback)
+     ``enlighten.enphaseenergy.com/login/login.json`` →
+     ``entrez.enphaseenergy.com/tokens``.  Kept as a fallback because some
+     account configurations may not support the PKCE redirect.
+
+Public API:
   - get_token(): returns a valid token; refreshes when near expiry or missing
-  - refresh_token(): force refresh from cloud and validate token against local Envoy
+  - refresh_token(): force refresh and validate token against local Envoy
 
 Notes:
-  - Requires `pyenphase` and `aiohttp` in your Indigo plugin environment.
+  - Requires ``pyenphase`` and ``aiohttp`` in the plugin environment.
   - Cloud token retrieval may fail if Enlighten MFA is enabled.
 """
 
 from __future__ import annotations
 from datetime import datetime
 import asyncio
+import base64
+import hashlib
 import logging
+import secrets
+import string
 import time
 from dataclasses import dataclass
 from typing import Optional
+from urllib import parse
 
 import jwt  # PyJWT
-
 
 import aiohttp
 from pyenphase.auth import EnvoyTokenAuth
 from pyenphase.ssl import NO_VERIFY_SSL_CONTEXT
+
+# ── PKCE helpers (ported from vincentwolsink HA installer integration) ──
+
+ENLIGHTEN_LOGIN_URL = "https://entrez.enphaseenergy.com/login"
+ENDPOINT_URL_GET_JWT = "https://{}/auth/get_jwt"
+ENDPOINT_URL_CHECK_JWT = "https://{}/auth/check_jwt"
+
+
+def _random_content(length: int) -> str:
+    """Return a random alphanumeric string of *length* characters."""
+    chars = string.ascii_letters + string.digits
+    return "".join(secrets.choice(chars) for _ in range(length))
+
+
+def _generate_challenge(code: str) -> str:
+    """Derive a PKCE code-challenge (S256) from *code*."""
+    sha = hashlib.sha256(code.encode("utf-8")).digest()
+    return (
+        base64.b64encode(sha)
+        .decode("utf-8")
+        .replace("+", "-")
+        .replace("/", "_")
+        .replace("=", "")
+    )
 
 
 @dataclass
@@ -213,35 +250,168 @@ class EnphaseTokenManager:
                     loop.close()
             raise
 
-    async def _async_refresh_and_validate(self) -> str:
-        """
-        Use pyenphase EnvoyTokenAuth to:
-          1) refresh token from cloud
-          2) setup() to validate against local Envoy
-        """
-        assert aiohttp is not None
-        assert NO_VERIFY_SSL_CONTEXT is not None
+    # ── PKCE OAuth flow (vincentwolsink) ───────────────────────────────
 
-        connector = aiohttp.TCPConnector(ssl=NO_VERIFY_SSL_CONTEXT)
+    async def _async_pkce_fetch_token(self) -> str:
+        """Obtain token via the PKCE OAuth flow used by the Envoy web UI.
+
+        Steps (reverse-engineered from vincentwolsink HA installer integration):
+          1. Generate a PKCE code_verifier + code_challenge.
+          2. POST credentials to ``entrez.enphaseenergy.com/login`` with the
+             challenge.  Expect a 302 redirect whose Location carries an
+             authorization ``code``.
+          3. POST the code + verifier to the **local Envoy**
+             ``/auth/get_jwt`` which returns the JWT.
+
+        The Envoy mints the token so the ``enphaseUser`` claim correctly
+        reflects the Enlighten account type (owner / installer).
+        """
+        code_verifier = _random_content(40)
+
+        login_data = {
+            "username": self.cloud_username,
+            "password": self.cloud_password,
+            "codeChallenge": _generate_challenge(code_verifier),
+            "redirectUri": f"https://{self.host}/auth/callback",
+            "client": "envoy-ui",
+            "clientId": "envoy-ui-client",
+            "authFlow": "oauth",
+            "serialNum": self.envoy_serial,
+            "granttype": "authorize",
+            "state": "",
+            "invalidSerialNum": "",
+        }
+
+        self.logger.debug("PKCE: posting to entrez login with challenge %s", login_data["codeChallenge"])
+
+        # SSL context that verifies certs for Enlighten cloud
         timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
 
-        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as client:
-            # Force cloud refresh first
-            self.logger.debug("Calling pyenphase EnvoyTokenAuth.refresh()")
-            await self._auth.refresh()
+        # Do NOT follow redirects — we need the 302 Location header
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+        ) as client:
+            # Step 2 – login at entrez (expect 302)
+            async with client.post(
+                ENLIGHTEN_LOGIN_URL,
+                data=login_data,
+                allow_redirects=False,
+            ) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise ValueError(
+                        f"PKCE: Enlighten login failed — HTTP {resp.status}: {body[:200]}"
+                    )
+                if resp.status != 302:
+                    raise ValueError(
+                        f"PKCE: Expected 302 redirect from Enlighten login, got {resp.status}"
+                    )
 
-            # Validate/setup against local Envoy (and ensure headers/cookies correct)
-            self.logger.debug("Calling pyenphase EnvoyTokenAuth.setup() for local validation")
-            await self._auth.setup(client)
+                redirect_location = resp.headers.get("location", "")
 
-        # Pull token from pyenphase object
-        new_token = getattr(self._auth, "token", None)
+            url_parts = parse.urlparse(redirect_location)
+            query_parts = parse.parse_qs(url_parts.query)
+
+            if "code" not in query_parts:
+                raise ValueError(
+                    f"PKCE: No authorization code in redirect URL: {redirect_location}"
+                )
+
+            # Step 3 – exchange code for JWT on local Envoy (self-signed cert)
+            json_data = {
+                "client_id": "envoy-ui-1",
+                "code": query_parts["code"][0],
+                "code_verifier": code_verifier,
+                "grant_type": "authorization_code",
+                "redirect_uri": login_data["redirectUri"],
+            }
+
+            self.logger.debug("PKCE: exchanging code for JWT on local Envoy")
+
+            envoy_connector = aiohttp.TCPConnector(ssl=NO_VERIFY_SSL_CONTEXT)
+            async with aiohttp.ClientSession(
+                connector=envoy_connector,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as envoy_client:
+                async with envoy_client.post(
+                    ENDPOINT_URL_GET_JWT.format(self.host),
+                    json=json_data,
+                ) as jwt_resp:
+                    if jwt_resp.status != 200:
+                        body = await jwt_resp.text()
+                        raise ValueError(
+                            f"PKCE: Could not fetch JWT from Envoy /auth/get_jwt — "
+                            f"HTTP {jwt_resp.status}: {body[:200]}"
+                        )
+                    jwt_json = await jwt_resp.json()
+                    return jwt_json["access_token"]
+
+    # ── Orchestration: try PKCE first, fall back to pyenphase ────────
+
+    async def _async_refresh_and_validate(self) -> str:
+        """Obtain a fresh token: try PKCE OAuth first, then pyenphase cloud."""
+
+        new_token: str | None = None
+
+        # ── Attempt 1: PKCE OAuth (vincentwolsink) ──
+        try:
+            self.logger.info("Token refresh: trying PKCE OAuth flow (Envoy web-UI style)…")
+            new_token = await self._async_pkce_fetch_token()
+            self.logger.info("PKCE OAuth flow succeeded.")
+        except Exception as exc:
+            self.logger.warning("PKCE OAuth flow failed (%s). Falling back to pyenphase cloud flow.", exc)
+
+        # ── Attempt 2: pyenphase cloud (original) ──
         if not new_token:
-            raise ValueError("pyenphase EnvoyTokenAuth did not provide a token after refresh/setup.")
+            try:
+                self.logger.info("Token refresh: trying pyenphase cloud flow…")
+                assert aiohttp is not None
+                assert NO_VERIFY_SSL_CONTEXT is not None
+
+                connector = aiohttp.TCPConnector(ssl=NO_VERIFY_SSL_CONTEXT)
+                timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as client:
+                    self.logger.debug("Calling pyenphase EnvoyTokenAuth.refresh()")
+                    await self._auth.refresh()
+                    self.logger.debug("Calling pyenphase EnvoyTokenAuth.setup() for local validation")
+                    await self._auth.setup(client)
+
+                new_token = getattr(self._auth, "token", None)
+                if new_token:
+                    self.logger.info("pyenphase cloud flow succeeded.")
+            except Exception as exc:
+                self.logger.error("pyenphase cloud flow also failed: %s", exc)
+
+        if not new_token:
+            raise ValueError("Both PKCE and pyenphase token flows failed. Check credentials and network.")
+
+        # ── Validate with local Envoy (/auth/check_jwt) ──
+        try:
+            envoy_connector = aiohttp.TCPConnector(ssl=NO_VERIFY_SSL_CONTEXT)
+            async with aiohttp.ClientSession(
+                connector=envoy_connector,
+                timeout=aiohttp.ClientTimeout(total=self.timeout_seconds),
+            ) as client:
+                async with client.get(
+                    ENDPOINT_URL_CHECK_JWT.format(self.host),
+                    headers={"Authorization": f"Bearer {new_token}"},
+                ) as check_resp:
+                    if check_resp.status == 200:
+                        self.logger.debug("Token validated against local Envoy (/auth/check_jwt).")
+                    else:
+                        self.logger.warning(
+                            "Token check_jwt returned HTTP %s — token may not be accepted by Envoy.",
+                            check_resp.status,
+                        )
+        except Exception as exc:
+            self.logger.warning("Could not validate token with local Envoy: %s", exc)
 
         exp_ts = self._jwt_exp_ts(new_token)
         self._state = TokenState(token=new_token, exp_ts=exp_ts, fetched_ts=int(time.time()))
 
-        self.logger.info("Successfully obtained new token . Expires: %s — will auto-refresh before expiry.",
-                          datetime.fromtimestamp(exp_ts).isoformat() if exp_ts else "<unknown>")
+        self.logger.info(
+            "Successfully obtained new token. Expires: %s — will auto-refresh before expiry.",
+            datetime.fromtimestamp(exp_ts).isoformat() if exp_ts else "<unknown>",
+        )
         return new_token
