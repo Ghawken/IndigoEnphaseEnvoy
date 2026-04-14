@@ -742,15 +742,15 @@ class Plugin(indigo.PluginBase):
             decode = jwt.decode( token, options={"verify_signature": False}, algorithms="ES256"  )
             exp_epoch = decode["exp"]
             self.logger.debug(f"Decoded Token:\n{decode}")
-            # allow a buffer so we can try and grab it sooner
-            exp_epoch -= 0
             exp_time = datetime.datetime.fromtimestamp(exp_epoch)
             self.generated_token_expiry = exp_time
-            if datetime.datetime.now() < exp_time:
+            # refresh 5 minutes before actual expiry to avoid failed requests
+            refresh_time = datetime.datetime.fromtimestamp(exp_epoch - 300)
+            if datetime.datetime.now() < refresh_time:
                 self.logger.debug("Enphase Token expires at: %s", exp_time)
                 return False
             else:
-                self.logger.debug("Enphase Token expired on: %s", exp_time)
+                self.logger.debug("Enphase Token expiring soon/expired (actual expiry: %s) — refreshing proactively", exp_time)
                 return True
         except:
             self.logger.exception("Exception with check expired token.  Perhaps Crytography not installed?")
