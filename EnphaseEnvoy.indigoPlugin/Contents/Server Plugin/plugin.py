@@ -1575,7 +1575,7 @@ class Plugin(indigo.PluginBase):
                                         dev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
                                     if panel.get('dc_current') is not None:
                                         dc_a = round(panel['dc_current'], 3)
-                                        dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a} A")
+                                        dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a:.3f} A")
                                     if panel.get('temperature') is not None:
                                         temp = panel['temperature']
                                         dev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
@@ -1744,9 +1744,9 @@ class Plugin(indigo.PluginBase):
                 "maxReportWatts": 0,  # devstatus doesn't carry a max field
                 # extra devstatus fields — pre-converted to final units
                 "ac_power_watts": watts,            # W  (same as lastReportWatts)
-                "ac_voltage": ds.get("ac_voltage"), # V  (already converted in parseDevStatus)
-                "dc_voltage": ds.get("dc_voltage"), # V  (already converted in parseDevStatus)
-                "dc_current": ds.get("dc_current"), # A  (already converted in parseDevStatus)
+                "ac_voltage": round(ds.get("ac_voltage"), 2) if ds.get("ac_voltage") is not None else None,
+                "dc_voltage": round(ds.get("dc_voltage"), 2) if ds.get("dc_voltage") is not None else None,
+                "dc_current": round(ds.get("dc_current"), 3) if ds.get("dc_current") is not None else None,
                 "temperature": ds.get("temperature"),
                 # 'gone' is True when the inverter is NOT communicating
                 # (parseDevStatus inverts the raw 'communicating' bool)
