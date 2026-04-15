@@ -903,7 +903,7 @@ class Plugin(indigo.PluginBase):
             "datetime": 22 * 60,  # 22 min
             "envoy_type": 6 * 60 * 60,  # 6 h
             "panel_inventory": 5 * 60,  # 5 min
-            "panel_health": 200,  # 3 min 20 s
+            "panel_health": 60,  # 1 min
             "envoy_refresh": 60,  # 1 min
         }
 
@@ -1545,6 +1545,19 @@ class Plugin(indigo.PluginBase):
                 self.thePanels = self.getthePanels(dev)
             else:
                 self.thePanels = thePanels
+
+            # If installer token, also fetch devstatus for extra detail
+            devstatus_by_sn = {}
+            if self._is_installer_token(dev):
+                devstatus_data = self.getDevStatus(dev)
+                if devstatus_data:
+                    for ds in devstatus_data:
+                        sn = ds.get("sn")
+                        if sn is not None:
+                            devstatus_by_sn[str(int(sn))] = ds
+                    if self.debugLevel >= 2:
+                        self.logger.debug(f"DevStatus data indexed by SN: {len(devstatus_by_sn)} inverters")
+
             try:
                 if self.thePanels is not None:
                     x = 1
@@ -1554,17 +1567,34 @@ class Plugin(indigo.PluginBase):
                     for dev in indigo.devices.iter('self.EnphasePanelDevice'):
                         for panel in self.thePanels:
                             if float(dev.states['serialNo']) == float(panel['serialNumber']):
-                                #self.logger.error(u'Matched Panel Found:'+str(panel['serialNumber']))
-                                #deviceName = 'Enphase SolarPanel ' + str(x)
-                                #self.logger.error(u"Enphase Panel SN:"+str(str(panel['serialNumber'])))
-                                #if dev.states['producing']:
                                 dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(panel['lastReportWatts']))
                                 dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp( int(panel['lastReportDate'])).strftime('%c')))
-                                #dev.updateStateOnServer('serialNo', value=float(panel['serialNumber']))
                                 dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
                                 dev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                 dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
                                 dev.setErrorStateOnServer(None)
+
+                                # Overlay devstatus data if available (installer token)
+                                panel_sn = str(int(panel['serialNumber']))
+                                ds = devstatus_by_sn.get(panel_sn)
+                                if ds:
+                                    if 'ac_power' in ds:
+                                        ac_watts = round(ds['ac_power'] / 1000, 1)
+                                        dev.updateStateOnServer('acPower', value=ac_watts, uiValue=f"{ac_watts} W")
+                                    if 'ac_voltage' in ds:
+                                        ac_v = round(ds['ac_voltage'], 2)
+                                        dev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
+                                    if 'dc_voltage' in ds:
+                                        dc_v = round(ds['dc_voltage'], 2)
+                                        dev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
+                                    if 'dc_current' in ds:
+                                        dc_a = round(ds['dc_current'], 3)
+                                        dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a} A")
+                                    if 'temperature' in ds:
+                                        temp = ds['temperature']
+                                        dev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
+                                    if 'gone' in ds:
+                                        dev.updateStateOnServer('communicating', value=not ds['gone'])
 
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+str(error))
@@ -1716,6 +1746,101 @@ class Plugin(indigo.PluginBase):
                 self.WaitInterval = 60
                 result = None
                 return result
+
+    def getDevStatus(self, dev):
+        """
+        Fetch inverter device status from /ivp/peb/devstatus.
+        This endpoint requires an installer-level JWT token and returns
+        detailed per-inverter data (temperature, DC/AC voltage/current, power).
+        Returns the parsed list of device dicts, or None on failure.
+        """
+        try:
+            headers = self.create_headers(dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/peb/devstatus"
+            r = self._get(url, timeout=35, headers=headers)
+            if r.status_code == 200:
+                raw = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"DevStatus raw result: {raw}")
+                return self.parseDevStatus(raw)
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"DevStatus returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching devstatus: {error}", exc_info=True)
+            return None
+
+    def parseDevStatus(self, data):
+        """
+        Parse the /ivp/peb/devstatus response into a list of device dicts.
+        Based on the vincentwolsink HA integration's parse_devstatus function.
+
+        The response has a 'pcu' key containing:
+          - 'fields': list of field names
+          - 'values': list of value arrays (one per inverter)
+
+        Returns a list of dicts with keys:
+          sn, type, last_reading, temperature, dc_voltage, dc_current,
+          ac_voltage, ac_power, gone (True if not communicating)
+        """
+        pcu_field_map = {
+            "sn": "serialNumber",
+            "type": "devType",
+            "last_reading": "reportDate",
+            "temperature": "temperature",
+            "dc_voltage": "dcVoltageINmV",
+            "dc_current": "dcCurrentINmA",
+            "ac_voltage": "acVoltageINmV",
+            "ac_power": "acPowerINmW",
+            "gone": "communicating",
+        }
+        device_type_map = {1: "pcu", 12: "nsrb"}
+
+        result = []
+        for itemtype, content in data.items():
+            if itemtype != "pcu":
+                continue
+            dataset = pcu_field_map
+
+            fields = content.get("fields", [])
+            values = content.get("values", [])
+
+            # Build index map: our_key -> position in the values array
+            field_index = {}
+            for key, field_name in dataset.items():
+                if field_name in fields:
+                    field_index[key] = fields.index(field_name)
+
+            for valueset in values:
+                device_data = {}
+                for key, idx in field_index.items():
+                    value = valueset[idx]
+                    if dataset[key].endswith(("mA", "mV", "mHz")):
+                        device_data[key] = int(value) / 1000
+                    elif key == "type":
+                        device_data[key] = device_type_map.get(value, value)
+                    elif key == "gone":
+                        device_data[key] = not value
+                    else:
+                        device_data[key] = value
+                result.append(device_data)
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Parsed devstatus inverter: {device_data}")
+
+        return result if result else None
+
+    def _is_installer_token(self, dev):
+        """Check whether the current token for this device is installer-level."""
+        token = ""
+        if dev.pluginProps.get('use_token', False):
+            token = dev.pluginProps.get('auth_token', "")
+        elif dev.pluginProps.get('generate_token', False):
+            token = self.generated_token.get(dev.id, "")
+        if token:
+            return self._get_token_type(token) == "installer"
+        return False
 
     def getMetersReadings(self, dev):
         """
