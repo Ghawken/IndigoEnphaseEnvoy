@@ -191,7 +191,6 @@ class Plugin(indigo.PluginBase):
         self.endpoint_type = ""
         self.endpoint_url = ""
         self.generated_token = {}  # dev.id -> token string
-        self._suppress_device_start = set()  # dev.id values currently in replacePluginPropsOnServer
 
         self.using_token = False
 
@@ -229,18 +228,33 @@ class Plugin(indigo.PluginBase):
         """
         try:
             for dev in indigo.devices.iter('self'):
-                if dev.pluginProps.get("token_source") == "generated" and dev.pluginProps.get("auth_token", ""):
+                if self._get_saved_token(dev.id):
                     self.logger.info(f"Startup: clearing saved generated token for device '{dev.name}' — will re-generate.")
-                    localProps = dev.pluginProps
-                    localProps["auth_token"] = ""
-                    localProps["token_source"] = ""
-                    self._suppress_device_start.add(dev.id)
-                    try:
-                        dev.replacePluginPropsOnServer(localProps)
-                    finally:
-                        self._suppress_device_start.discard(dev.id)
+                    self._clear_saved_token(dev.id)
         except Exception:
             self.logger.debug("Could not clear saved tokens on startup.", exc_info=True)
+
+    # ── Generated-token persistence (pluginPrefs, no device restart) ──
+
+    def _saved_token_key(self, dev_id):
+        """Return the pluginPrefs key used to store a generated token for *dev_id*."""
+        return f"saved_gen_token_{dev_id}"
+
+    def _get_saved_token(self, dev_id):
+        """Return the saved generated token for *dev_id*, or empty string."""
+        return self.pluginPrefs.get(self._saved_token_key(dev_id), "")
+
+    def _save_generated_token(self, dev_id, token):
+        """Persist a generated token in pluginPrefs (does NOT trigger device restart)."""
+        self.pluginPrefs[self._saved_token_key(dev_id)] = token
+        indigo.server.savePluginPrefs()
+
+    def _clear_saved_token(self, dev_id):
+        """Remove a previously saved generated token from pluginPrefs."""
+        key = self._saved_token_key(dev_id)
+        if key in self.pluginPrefs:
+            del self.pluginPrefs[key]
+            indigo.server.savePluginPrefs()
 
     def _new_session(self):
         """Create a fresh requests.Session with keep-alive and TLS disabled."""
@@ -331,18 +345,17 @@ class Plugin(indigo.PluginBase):
             dev = indigo.devices[devId]
             old_generate_token = dev.pluginProps.get("generate_token", False)
             new_generate_token = valuesDict.get("generate_token", False)
-            # Token mode changed — reset token_source so the new mode starts
-            # cleanly.  auth_token is left as-is: if the user pasted a new
-            # manual token it is already in valuesDict; if they didn't, the
-            # old (generated) token can still serve until they replace it.
-            # The runtime cache (self.generated_token) is cleared separately
-            # in deviceStartComm which runs after this dialog closes.
+            # Token mode changed — clear saved generated token so the new mode
+            # starts cleanly.  deviceStartComm (which runs after this dialog
+            # closes) will clear the in-memory cache.
             if old_generate_token != new_generate_token:
                 self.logger.info(
                     f"Token mode changed (generate_token: {old_generate_token} → {new_generate_token}) "
                     f"— resetting token_source."
                 )
                 valuesDict["token_source"] = ""
+                self._clear_saved_token(devId)
+                self.generated_token.pop(devId, None)
             # Credentials changed while in generate-token mode — force a
             # fresh token so an owner→installer switch takes effect
             # immediately instead of re-using the old cached token.
@@ -357,6 +370,8 @@ class Plugin(indigo.PluginBase):
                     )
                     valuesDict["token_source"] = ""
                     valuesDict["auth_token"] = ""
+                    self._clear_saved_token(devId)
+                    self.generated_token.pop(devId, None)
 
             return (True, valuesDict)
         except Exception:
@@ -402,9 +417,6 @@ class Plugin(indigo.PluginBase):
 
     # Start 'em up.
     def deviceStartComm(self, dev):
-        # Guard against re-entrant calls triggered by replacePluginPropsOnServer
-        if dev.id in self._suppress_device_start:
-            return
  #
  #      self.logger.debug(u"deviceStartComm() method called.")
         #self.errorLog(str(dev.model))
@@ -432,21 +444,11 @@ class Plugin(indigo.PluginBase):
 
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
+        # Clear in-memory token so create_headers re-checks the saved copy.
+        # Saved tokens (in pluginPrefs) are left intact — they are only
+        # cleared explicitly via validateDeviceConfigUi (credential/mode
+        # change) or the forceTokenClear pref.
         self.generated_token.pop(dev.id, None)
-    # Also clear persisted generated token so that credential changes
-    # (e.g. owner → installer) take effect immediately instead of
-    # re-using the old cached token until it expires.
-
-
-        if dev.pluginProps.get("token_source") == "generated" and dev.pluginProps.get("auth_token", ""):
-            localProps = dev.pluginProps
-            localProps["auth_token"] = ""
-            localProps["token_source"] = ""
-            self._suppress_device_start.add(dev.id)
-            try:
-                dev.replacePluginPropsOnServer(localProps)
-            finally:
-                self._suppress_device_start.discard(dev.id)
 
         self.log_manual_expiry = True
         self.force_update.add(dev.id)
@@ -620,14 +622,7 @@ class Plugin(indigo.PluginBase):
             self.logger.debug(f"Enphase token ready {token_raw})")
             self.generated_token[dev.id] = token_raw
             self._log_token_info(token_raw, dev, source="newly generated")
-            localPropsCopy = dev.pluginProps
-            localPropsCopy["auth_token"] = token_raw
-            localPropsCopy["token_source"] = "generated"
-            self._suppress_device_start.add(dev.id)
-            try:
-                dev.replacePluginPropsOnServer(localPropsCopy)
-            finally:
-                self._suppress_device_start.discard(dev.id)
+            self._save_generated_token(dev.id, token_raw)
 
             return token_raw
 
@@ -1137,12 +1132,9 @@ class Plugin(indigo.PluginBase):
 
         if generate_token:
             self.https_flag="s"
-            # Only trust saved auth_token if it was actually generated (not a leftover manual token)
-            token_source = dev.pluginProps.get("token_source", "")
-            saved_is_generated = (token_source == "generated")
             # Startup: only when we haven't loaded token into memory yet
             if self.generated_token.get(dev.id, "") == "":
-                saved = dev.pluginProps.get("auth_token", "") if saved_is_generated else ""
+                saved = self._get_saved_token(dev.id)
                 if saved:
                     try:
                         self._log_token_info(saved, dev, source="saved/cached")
@@ -1152,16 +1144,12 @@ class Plugin(indigo.PluginBase):
                     except Exception:
                         self.logger.debug("Saved token found, but could not parse expiry.", exc_info=True)
                 else:
-                    if not saved_is_generated and dev.pluginProps.get("auth_token", ""):
-                        self.logger.info(
-                            "Ignoring saved token — it was from manual entry, not generated. Will generate a fresh token.")
-                    else:
-                        self.logger.info(
-                            "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
+                    self.logger.info(
+                        "No saved Enphase token found on device; will attempt to generate/refresh when needed.")
 
             # Load token into runtime cache (after the one-time log)
-            if saved_is_generated:
-                self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id, "")
+            if not self.generated_token.get(dev.id, ""):
+                self.generated_token[dev.id] = self._get_saved_token(dev.id)
 
             if username == "":
                 self.logger.error("To Generate a token you must enter username in device edit settings for enphase")
@@ -1171,8 +1159,6 @@ class Plugin(indigo.PluginBase):
                 return headers
             if (not self.generated_token.get(dev.id, "")) or self._is_enphase_token_expired(self.generated_token[dev.id]):
                 self.get_enphasetoken(username, password, self.serial_number_full.get(dev.id,""), dev)
-                # (optional but safe) reload in case get_enphasetoken saved to pluginProps
-                self.generated_token[dev.id] = dev.pluginProps.get("auth_token", "") or self.generated_token.get(dev.id,"")
             headers = {"Accept": "application/json",  "Authorization": "Bearer " + str(self.generated_token.get(dev.id, ""))}
 
         return headers
