@@ -191,6 +191,7 @@ class Plugin(indigo.PluginBase):
         self.endpoint_type = ""
         self.endpoint_url = ""
         self.generated_token = {}  # dev.id -> token string
+        self._suppress_device_start = set()  # dev.id values currently in replacePluginPropsOnServer
 
         self.using_token = False
 
@@ -233,7 +234,11 @@ class Plugin(indigo.PluginBase):
                     localProps = dev.pluginProps
                     localProps["auth_token"] = ""
                     localProps["token_source"] = ""
-                    dev.replacePluginPropsOnServer(localProps)
+                    self._suppress_device_start.add(dev.id)
+                    try:
+                        dev.replacePluginPropsOnServer(localProps)
+                    finally:
+                        self._suppress_device_start.discard(dev.id)
         except Exception:
             self.logger.debug("Could not clear saved tokens on startup.", exc_info=True)
 
@@ -397,6 +402,9 @@ class Plugin(indigo.PluginBase):
 
     # Start 'em up.
     def deviceStartComm(self, dev):
+        # Guard against re-entrant calls triggered by replacePluginPropsOnServer
+        if dev.id in self._suppress_device_start:
+            return
  #
  #      self.logger.debug(u"deviceStartComm() method called.")
         #self.errorLog(str(dev.model))
@@ -434,7 +442,11 @@ class Plugin(indigo.PluginBase):
             localProps = dev.pluginProps
             localProps["auth_token"] = ""
             localProps["token_source"] = ""
-            dev.replacePluginPropsOnServer(localProps)
+            self._suppress_device_start.add(dev.id)
+            try:
+                dev.replacePluginPropsOnServer(localProps)
+            finally:
+                self._suppress_device_start.discard(dev.id)
 
         self.log_manual_expiry = True
         self.force_update.add(dev.id)
@@ -611,7 +623,11 @@ class Plugin(indigo.PluginBase):
             localPropsCopy = dev.pluginProps
             localPropsCopy["auth_token"] = token_raw
             localPropsCopy["token_source"] = "generated"
-            dev.replacePluginPropsOnServer(localPropsCopy)
+            self._suppress_device_start.add(dev.id)
+            try:
+                dev.replacePluginPropsOnServer(localPropsCopy)
+            finally:
+                self._suppress_device_start.discard(dev.id)
 
             return token_raw
 
