@@ -597,6 +597,32 @@
         <ControlPageLabel>Date/time Last Communication from Panel</ControlPageLabel>
       </State>
 
+      <State id="temperature">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Inverter Temperature (°C)</TriggerLabel>
+        <ControlPageLabel>Inverter Temperature (°C)</ControlPageLabel>
+      </State>
+      <State id="dcVoltage">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>DC Voltage (V)</TriggerLabel>
+        <ControlPageLabel>DC Voltage (V)</ControlPageLabel>
+      </State>
+      <State id="dcCurrent">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>DC Current (A)</TriggerLabel>
+        <ControlPageLabel>DC Current (A)</ControlPageLabel>
+      </State>
+      <State id="acVoltage">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>AC Voltage (V)</TriggerLabel>
+        <ControlPageLabel>AC Voltage (V)</ControlPageLabel>
+      </State>
+      <State id="acPower">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>AC Power (W)</TriggerLabel>
+        <ControlPageLabel>AC Power (W)</ControlPageLabel>
+      </State>
+
     </States>
 
     <UiDisplayStateId>watts</UiDisplayStateId>

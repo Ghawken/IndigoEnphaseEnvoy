@@ -903,7 +903,7 @@ class Plugin(indigo.PluginBase):
             "datetime": 22 * 60,  # 22 min
             "envoy_type": 6 * 60 * 60,  # 6 h
             "panel_inventory": 5 * 60,  # 5 min
-            "panel_health": 200,  # 3 min 20 s
+            "panel_health": 60,  # 3 min 20 s
             "envoy_refresh": 60,  # 1 min
         }
 
@@ -1545,6 +1545,7 @@ class Plugin(indigo.PluginBase):
                 self.thePanels = self.getthePanels(dev)
             else:
                 self.thePanels = thePanels
+
             try:
                 if self.thePanels is not None:
                     x = 1
@@ -1565,6 +1566,27 @@ class Plugin(indigo.PluginBase):
                                 dev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                 dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
                                 dev.setErrorStateOnServer(None)
+
+                                # Extra devstatus fields (present when data from /ivp/peb/devstatus)
+                                if panel.get('_source') == 'devstatus':
+                                    if panel.get('ac_power_watts') is not None:
+                                        ac_w = panel['ac_power_watts']
+                                        dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
+                                    if panel.get('ac_voltage') is not None:
+                                        ac_v = round(panel['ac_voltage'], 2)
+                                        dev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
+                                    if panel.get('dc_voltage') is not None:
+                                        dc_v = round(panel['dc_voltage'], 2)
+                                        dev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
+                                    if panel.get('dc_current') is not None:
+                                        dc_a = round(panel['dc_current'], 3)
+                                        dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a} A")
+                                    if panel.get('temperature') is not None:
+                                        temp = panel['temperature']
+                                        dev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
+                                    if panel.get('gone') is not None:
+                                        # gone=True means inverter is NOT communicating
+                                        dev.updateStateOnServer('communicating', value=not panel['gone'])
 
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+str(error))
@@ -1652,70 +1674,251 @@ class Plugin(indigo.PluginBase):
             self.WaitInterval = 60
             return result
 
-
     def getthePanels(self, dev):
+        """Fetch per-inverter panel data.
+
+        When an installer-level token is available the preferred
+        ``/ivp/peb/devstatus`` endpoint is tried first — it returns
+        more accurate, more up-to-date data including AC power,
+        DC voltage/current, temperature, etc.
+
+        If that fails or the token is owner-level, fall back to
+        ``/api/v1/production/inverters``.
+
+        Returns a list of dicts in a **unified format** that always
+        contains the standard keys used by callers:
+
+            serialNumber, lastReportWatts, lastReportDate, maxReportWatts
+
+        When the data comes from devstatus additional keys are present:
+
+            ac_power (mW), ac_voltage (V), dc_voltage (V),
+            dc_current (A), temperature, gone, _source='devstatus'
+        """
         if self.debugLevel >= 2:
             self.logger.debug(u"getthePanels Enphase Envoy method called.")
 
-        if self.serial_number_last_six =="":
+        if not dev.states['deviceIsOnline']:
+            return None
+
+        # ── Try devstatus first (installer token) ───────────────
+        if self._is_installer_token(dev):
+            devstatus = self.getDevStatus(dev)
+            if devstatus:
+                unified = self._devstatus_to_unified(devstatus)
+                if unified:
+                    if self.debugLevel >= 2:
+                        self.logger.debug(f"getthePanels: using devstatus endpoint ({len(unified)} inverters)")
+                    return unified
+                # devstatus parsed but produced no usable records – fall through
+            # devstatus unavailable/failed – fall through to legacy
+
+        # ── Legacy endpoint ─────────────────────────────────────
+        return self._getthePanels_legacy(dev)
+
+        # ---------------------------------------------------------
+
+    def _devstatus_to_unified(self, devstatus_list):
+        """Convert parseDevStatus() output into the unified panel format.
+
+        Adds the standard keys (serialNumber, lastReportWatts,
+        lastReportDate, maxReportWatts) expected by callers,
+        while keeping the original devstatus keys as extras.
+        All power/voltage/current values are pre-converted to
+        final display units so consumers don't need to re-convert.
+        """
+        result = []
+        for ds in devstatus_list:
+            sn = ds.get("sn")
+            if sn is None:
+                continue
+            # ac_power from parseDevStatus is in milliwatts (field acPowerINmW
+            # is not divided by 1000 there).  Convert to watts.
+            ac_power_mw = ds.get("ac_power", 0)
+            try:
+                watts = round(float(ac_power_mw) / 1000, 1)
+            except (ValueError, TypeError):
+                watts = 0
+
+            last_reading = ds.get("last_reading", 0)
+            panel = {
+                # standard keys expected everywhere
+                "serialNumber": sn,
+                "lastReportWatts": watts,
+                "lastReportDate": last_reading,
+                "maxReportWatts": 0,  # devstatus doesn't carry a max field
+                # extra devstatus fields — pre-converted to final units
+                "ac_power_watts": watts,  # W  (same as lastReportWatts)
+                "ac_voltage": round(ds.get("ac_voltage"), 2) if ds.get("ac_voltage") is not None else None,
+                "dc_voltage": round(ds.get("dc_voltage"), 2) if ds.get("dc_voltage") is not None else None,
+                "dc_current": round(ds.get("dc_current"), 3) if ds.get("dc_current") is not None else None,
+                "temperature": ds.get("temperature"),
+                # 'gone' is True when the inverter is NOT communicating
+                # (parseDevStatus inverts the raw 'communicating' bool)
+                "gone": ds.get("gone"),
+                "_source": "devstatus",
+            }
+            result.append(panel)
+        return result if result else None
+
+        # ---------------------------------------------------------
+
+    def _getthePanels_legacy(self, dev):
+        """Fetch panel data from the legacy /api/v1/production/inverters endpoint."""
+        if self.serial_number_last_six == "":
             if self.get_serial_number(dev):
                 self.logger.debug("Found the correct Serial Number.  Continuing.")
             else:
                 self.logger.debug("Error getting Serial Number.  Cannot update panels unfortunately")
-                return
-        if dev.states['deviceIsOnline']:
-            try:
-                headers = self.create_headers( dev)
-                url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production/inverters"
-                if self.debugLevel >=2:
-                    self.logger.debug(u"getthePanels: Password:"+str(self.serial_number_last_six))
-                if self.https_flag=="s":  # Using check using https in which case token.
-                    r = self._get( url, timeout=35, headers=headers)
-                    #r = self.session.get(url,headers=headers, timeout=35,verify=False, allow_redirects=True)
-                else:
-                    auth = HTTPDigestAuth('envoy', self.serial_number_last_six)
-                    r = self._get( url, timeout=34, headers=headers, auth=auth)
-                    #r = self.session.get(url, auth=HTTPDigestAuth('envoy',self.serial_number_last_six), verify=False, timeout=35, allow_redirects=True)
+                return None
+        try:
+            headers = self.create_headers(dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/api/v1/production/inverters"
+            if self.debugLevel >= 2:
+                self.logger.debug(u"getthePanels (legacy): Password:" + str(self.serial_number_last_six))
+            if self.https_flag == "s":
+                r = self._get(url, timeout=35, headers=headers)
+            else:
+                auth = HTTPDigestAuth('envoy', self.serial_number_last_six)
+                r = self._get(url, timeout=34, headers=headers, auth=auth)
 
-                if r.status_code != 200:
-                    raise Exception(f"HTTP {r.status_code} from {url}")
-                result = r.json()
+            if r.status_code != 200:
+                raise Exception(f"HTTP {r.status_code} from {url}")
+            result = r.json()
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Inverter Result (legacy):{result}")
+            if "status" in result:
+                if result["status"] == 401:
+                    self.logger.info(f"Error getting Panel Data: Error : {result}")
+                    return None
+            return result
+
+        except requests.exceptions.ReadTimeout as e:
+            self.logger.debug("ReadTimeout with get Panel Devices:" + str(e))
+            return None
+        except requests.exceptions.Timeout as e:
+            self.logger.debug("Timeout with get Panel Devices:" + str(e))
+            return None
+        except requests.exceptions.ConnectionError as e:
+            self.logger.debug("ConnectionError with get Panel Devices:" + str(e))
+            return None
+        except requests.exceptions.ConnectTimeout as e:
+            self.logger.debug("ConnectTimeout with get Panel Devices:" + str(e))
+            return None
+        except Exception as error:
+            indigo.server.log(u"Error connecting to Device:" + dev.name)
+            if self.debugLevel >= 2:
+                self.logger.debug(u"Device is offline. No data to return. ", exc_info=True)
+            dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+            for paneldevice in indigo.devices.iter('self.EnphasePanelDevice'):
+                paneldevice.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+                paneldevice.updateStateOnServer('watts', value=0)
+                paneldevice.setErrorStateOnServer(u'Offline')
+            self.WaitInterval = 60
+            return None
+
+    def getDevStatus(self, dev):
+        """
+        Fetch inverter device status from /ivp/peb/devstatus.
+        This endpoint requires an installer-level JWT token and returns
+        detailed per-inverter data (temperature, DC/AC voltage/current, power).
+        Returns the parsed list of device dicts, or None on failure.
+        """
+        try:
+            headers = self.create_headers(dev)
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/peb/devstatus"
+            r = self._get(url, timeout=35, headers=headers)
+            if r.status_code == 200:
+                raw = r.json()
                 if self.debugLevel >= 2:
-                    self.logger.debug(f"Inverter Result:{result}")
-                if "status" in result:
-                    if result["status"] ==  401:
-                        self.logger.info(f"Error getting Panel Data: Error : {result}")
-                        return None
-                return result
-
-            except requests.exceptions.ReadTimeout as e:
-                self.logger.debug("ReadTimeout with get Panel Devices:" + str(e))
-                return None
-            except requests.exceptions.Timeout as e:
-                self.logger.debug("ReadTimeout with get Panel Devices:" + str(e))
-                return None
-            except requests.exceptions.ConnectionError as e:
-                self.logger.debug("ReadTimeout with get Panel Devices:" + str(e))
-                return None
-            except requests.exceptions.ConnectTimeout as e:
-                self.logger.debug("ReadTimeout with get Panel Devices:" + str(e))
-                result = None
-                return result
-
-            except Exception as error:
-
-                indigo.server.log(u"Error connecting to Device:" + dev.name)
+                    self.logger.debug(f"DevStatus raw result: {raw}")
+                return self.parseDevStatus(raw)
+            else:
                 if self.debugLevel >= 2:
-                    self.logger.debug(u"Device is offline. No data to return. ", exc_info=True)
-                # dev.updateStateOnServer('deviceTimestamp', value=t.time())
-                dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
-                for paneldevice in indigo.devices.iter('self.EnphasePanelDevice'):
-                    paneldevice.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
-                    paneldevice.updateStateOnServer('watts', value=0)
-                    paneldevice.setErrorStateOnServer(u'Offline')
-                self.WaitInterval = 60
-                result = None
-                return result
+                    self.logger.debug(f"DevStatus returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching devstatus: {error}", exc_info=True)
+            return None
+
+    def parseDevStatus(self, data):
+        """
+        Parse the /ivp/peb/devstatus response into a list of device dicts.
+        Based on the vincentwolsink HA integration's parse_devstatus function.
+
+        The response has a 'pcu' key containing:
+          - 'fields': list of field names
+          - 'values': list of value arrays (one per inverter)
+
+        Returns a list of dicts with keys:
+          sn, type, last_reading, temperature, dc_voltage, dc_current,
+          ac_voltage, ac_power, gone (True if not communicating)
+        """
+        pcu_field_map = {
+            "sn": "serialNumber",
+            "type": "devType",
+            "last_reading": "reportDate",
+            "temperature": "temperature",
+            "dc_voltage": "dcVoltageINmV",
+            "dc_current": "dcCurrentINmA",
+            "ac_voltage": "acVoltageINmV",
+            "ac_power": "acPowerINmW",
+            "gone": "communicating",
+        }
+        device_type_map = {1: "pcu", 12: "nsrb"}
+
+        result = []
+        for itemtype, content in data.items():
+            if itemtype != "pcu":
+                continue
+            dataset = pcu_field_map
+
+            fields = content.get("fields", [])
+            values = content.get("values", [])
+
+            # Build index map: our_key -> position in the values array
+            field_index = {}
+            for key, field_name in dataset.items():
+                if field_name in fields:
+                    field_index[key] = fields.index(field_name)
+
+            for valueset in values:
+                device_data = {}
+                for key, idx in field_index.items():
+                    try:
+                        value = valueset[idx]
+                    except (IndexError, TypeError):
+                        continue
+                    try:
+                        if dataset[key].endswith(("mA", "mV", "mHz")):
+                            device_data[key] = int(value) / 1000
+                        elif key == "type":
+                            device_data[key] = device_type_map.get(value, value)
+                        elif key == "gone":
+                            # Raw field is 'communicating' (True=talking).
+                            # Invert so gone=True means NOT communicating.
+                            device_data[key] = not value
+                        else:
+                            device_data[key] = value
+                    except (ValueError, TypeError):
+                        device_data[key] = value
+                result.append(device_data)
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Parsed devstatus inverter: {device_data}")
+
+        return result if result else None
+
+    def _is_installer_token(self, dev):
+        """Check whether the current token for this device is installer-level."""
+        token = ""
+        if dev.pluginProps.get('use_token', False):
+            token = dev.pluginProps.get('auth_token', "")
+        elif dev.pluginProps.get('generate_token', False):
+            token = self.generated_token.get(dev.id, "")
+        if token:
+            return self._get_token_type(token) == "installer"
+        return False
 
     def getMetersReadings(self, dev):
         """
