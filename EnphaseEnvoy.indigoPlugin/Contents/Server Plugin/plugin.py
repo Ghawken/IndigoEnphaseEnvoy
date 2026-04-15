@@ -1583,7 +1583,13 @@ class Plugin(indigo.PluginBase):
                             if float(dev.states['serialNo']) == float(panel['serialNumber']):
                                 matched += 1
                                 dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(int(panel['lastReportWatts'])))
-                                dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp( int(panel['lastReportDate'])).strftime('%c')))
+                                # Only update lastCommunication when the timestamp is valid (> 0).
+                                # Devstatus returns last_reading=0 for offline/gone inverters;
+                                # converting 0 to a date produces "Jan 1 1970" which is misleading.
+                                # Keeping the previous value preserves the real last-seen time.
+                                report_ts = int(panel.get('lastReportDate', 0))
+                                if report_ts > 0:
+                                    dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
                                 dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
                                 dev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                 dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
