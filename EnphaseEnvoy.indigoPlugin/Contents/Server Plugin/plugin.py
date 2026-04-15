@@ -1564,9 +1564,9 @@ class Plugin(indigo.PluginBase):
 
                                 # Extra devstatus fields (present when data from /ivp/peb/devstatus)
                                 if panel.get('_source') == 'devstatus':
-                                    if panel.get('ac_power') is not None:
-                                        ac_watts = round(float(panel['ac_power']) / 1000, 1)
-                                        dev.updateStateOnServer('acPower', value=ac_watts, uiValue=f"{ac_watts} W")
+                                    if panel.get('ac_power_watts') is not None:
+                                        ac_w = panel['ac_power_watts']
+                                        dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
                                     if panel.get('ac_voltage') is not None:
                                         ac_v = round(panel['ac_voltage'], 2)
                                         dev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
@@ -1580,6 +1580,7 @@ class Plugin(indigo.PluginBase):
                                         temp = panel['temperature']
                                         dev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
                                     if panel.get('gone') is not None:
+                                        # gone=True means inverter is NOT communicating
                                         dev.updateStateOnServer('communicating', value=not panel['gone'])
 
             except Exception as error:
@@ -1718,6 +1719,8 @@ class Plugin(indigo.PluginBase):
         Adds the standard keys (serialNumber, lastReportWatts,
         lastReportDate, maxReportWatts) expected by callers,
         while keeping the original devstatus keys as extras.
+        All power/voltage/current values are pre-converted to
+        final display units so consumers don't need to re-convert.
         """
         result = []
         for ds in devstatus_list:
@@ -1725,8 +1728,7 @@ class Plugin(indigo.PluginBase):
             if sn is None:
                 continue
             # ac_power from parseDevStatus is in milliwatts (field acPowerINmW
-            # is not divided by 1000 there).  Convert to watts for the
-            # standard lastReportWatts field.
+            # is not divided by 1000 there).  Convert to watts.
             ac_power_mw = ds.get("ac_power", 0)
             try:
                 watts = round(float(ac_power_mw) / 1000, 1)
@@ -1740,12 +1742,14 @@ class Plugin(indigo.PluginBase):
                 "lastReportWatts": watts,
                 "lastReportDate": last_reading,
                 "maxReportWatts": 0,  # devstatus doesn't carry a max field
-                # carry through all extra devstatus fields
-                "ac_power": ac_power_mw,
-                "ac_voltage": ds.get("ac_voltage"),
-                "dc_voltage": ds.get("dc_voltage"),
-                "dc_current": ds.get("dc_current"),
+                # extra devstatus fields — pre-converted to final units
+                "ac_power_watts": watts,            # W  (same as lastReportWatts)
+                "ac_voltage": ds.get("ac_voltage"), # V  (already converted in parseDevStatus)
+                "dc_voltage": ds.get("dc_voltage"), # V  (already converted in parseDevStatus)
+                "dc_current": ds.get("dc_current"), # A  (already converted in parseDevStatus)
                 "temperature": ds.get("temperature"),
+                # 'gone' is True when the inverter is NOT communicating
+                # (parseDevStatus inverts the raw 'communicating' bool)
                 "gone": ds.get("gone"),
                 "_source": "devstatus",
             }
@@ -1886,6 +1890,8 @@ class Plugin(indigo.PluginBase):
                         elif key == "type":
                             device_data[key] = device_type_map.get(value, value)
                         elif key == "gone":
+                            # Raw field is 'communicating' (True=talking).
+                            # Invert so gone=True means NOT communicating.
                             device_data[key] = not value
                         else:
                             device_data[key] = value
