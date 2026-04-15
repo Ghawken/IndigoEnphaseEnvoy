@@ -1816,14 +1816,20 @@ class Plugin(indigo.PluginBase):
             for valueset in values:
                 device_data = {}
                 for key, idx in field_index.items():
-                    value = valueset[idx]
-                    if dataset[key].endswith(("mA", "mV", "mHz")):
-                        device_data[key] = int(value) / 1000
-                    elif key == "type":
-                        device_data[key] = device_type_map.get(value, value)
-                    elif key == "gone":
-                        device_data[key] = not value
-                    else:
+                    try:
+                        value = valueset[idx]
+                    except (IndexError, TypeError):
+                        continue
+                    try:
+                        if dataset[key].endswith(("mA", "mV", "mHz")):
+                            device_data[key] = int(value) / 1000
+                        elif key == "type":
+                            device_data[key] = device_type_map.get(value, value)
+                        elif key == "gone":
+                            device_data[key] = not value
+                        else:
+                            device_data[key] = value
+                    except (ValueError, TypeError):
                         device_data[key] = value
                 result.append(device_data)
                 if self.debugLevel >= 2:
