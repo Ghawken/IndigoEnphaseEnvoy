@@ -1582,39 +1582,47 @@ class Plugin(indigo.PluginBase):
                         for panel in self.thePanels:
                             if float(dev.states['serialNo']) == float(panel['serialNumber']):
                                 matched += 1
-                                dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(int(panel['lastReportWatts'])))
-                                # Only update lastCommunication when the timestamp is valid (> 0).
-                                # Devstatus returns last_reading=0 for offline/gone inverters;
-                                # converting 0 to a date produces "Jan 1 1970" which is misleading.
-                                # Keeping the previous value preserves the real last-seen time.
-                                report_ts = int(panel.get('lastReportDate', 0))
-                                if report_ts > 0:
-                                    dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
-                                dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
+                                inverter_gone = panel.get('gone', False)
+
+                                # When the inverter is gone/off, devstatus returns
+                                # zeros for all data fields (last_reading, temperature,
+                                # voltages, currents, power).  Skip overwriting those
+                                # so the panel device preserves its last valid readings.
+                                if not inverter_gone:
+                                    dev.updateStateOnServer('watts', value=int(panel['lastReportWatts']), uiValue=str(int(panel['lastReportWatts'])))
+                                    report_ts = int(panel.get('lastReportDate', 0))
+                                    if report_ts > 0:
+                                        dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
+                                    dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
+
                                 dev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                 dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
                                 dev.setErrorStateOnServer(None)
 
                                 # Extra devstatus fields (present when data from /ivp/peb/devstatus)
                                 if panel.get('_source') == 'devstatus':
-                                    if panel.get('ac_power_watts') is not None:
-                                        ac_w = panel['ac_power_watts']
-                                        dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
-                                    if panel.get('ac_voltage') is not None:
-                                        ac_v = panel['ac_voltage']
-                                        dev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
-                                    if panel.get('dc_voltage') is not None:
-                                        dc_v = panel['dc_voltage']
-                                        dev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
-                                    if panel.get('dc_current') is not None:
-                                        dc_a = panel['dc_current']
-                                        dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a:.3f} A")
-                                    if panel.get('temperature') is not None:
-                                        temp = panel['temperature']
-                                        dev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
                                     if panel.get('gone') is not None:
                                         # gone=True means inverter is NOT communicating
                                         dev.updateStateOnServer('communicating', value=not panel['gone'])
+
+                                    # Only update measurement fields when the inverter
+                                    # is actively reporting (not gone).
+                                    if not inverter_gone:
+                                        if panel.get('ac_power_watts') is not None:
+                                            ac_w = panel['ac_power_watts']
+                                            dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
+                                        if panel.get('ac_voltage') is not None:
+                                            ac_v = panel['ac_voltage']
+                                            dev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
+                                        if panel.get('dc_voltage') is not None:
+                                            dc_v = panel['dc_voltage']
+                                            dev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
+                                        if panel.get('dc_current') is not None:
+                                            dc_a = panel['dc_current']
+                                            dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a:.3f} A")
+                                        if panel.get('temperature') is not None:
+                                            temp = panel['temperature']
+                                            dev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
                     if self.debugLevel >= 2:
                         source = self.thePanels[0].get('_source', 'legacy') if self.thePanels else 'unknown'
                         self.logger.debug(
@@ -2466,7 +2474,6 @@ class Plugin(indigo.PluginBase):
                         stateList = [
                             {'key': 'serialNo', 'value': float(array['serialNumber'])},
                             {'key': 'watts', 'value': int(array['lastReportWatts']) },
-                            {'key': 'lastCommunication', 'value': str(datetime.datetime.fromtimestamp(int(array['lastReportDate'])).strftime('%c'))},
                             {'key': 'maxWatts', 'value': 0},
                             {'key': 'deviceLastUpdated', 'value': update_time },
                             {'key': 'deviceIsOnline', 'value': True},
@@ -2475,6 +2482,11 @@ class Plugin(indigo.PluginBase):
                             {'key': 'producing', 'value': False},
                             {'key': 'communicating', 'value': False}
                         ]
+                        # Only set lastCommunication when the timestamp is valid (> 0).
+                        # Devstatus returns 0 for gone/offline inverters → Jan 1 1970.
+                        create_ts = int(array.get('lastReportDate', 0))
+                        if create_ts > 0:
+                            stateList.append({'key': 'lastCommunication', 'value': str(datetime.datetime.fromtimestamp(create_ts).strftime('%c'))})
                         device = indigo.device.create(
                             address=str(serialNumber),
                             deviceTypeId='EnphasePanelDevice',
