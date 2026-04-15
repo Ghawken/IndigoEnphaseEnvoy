@@ -191,7 +191,6 @@ class Plugin(indigo.PluginBase):
         self.endpoint_type = ""
         self.endpoint_url = ""
         self.generated_token = {}  # dev.id -> token string
-
         self.using_token = False
 
         self.generated_token_expiry = datetime.datetime.now()
@@ -233,7 +232,9 @@ class Plugin(indigo.PluginBase):
                     localProps = dev.pluginProps
                     localProps["auth_token"] = ""
                     localProps["token_source"] = ""
+
                     dev.replacePluginPropsOnServer(localProps)
+
         except Exception:
             self.logger.debug("Could not clear saved tokens on startup.", exc_info=True)
 
@@ -434,7 +435,7 @@ class Plugin(indigo.PluginBase):
             localProps = dev.pluginProps
             localProps["auth_token"] = ""
             localProps["token_source"] = ""
-            dev.replacePluginPropsOnServer(localProps)
+            #dev.replacePluginPropsOnServer(localProps)
 
         self.log_manual_expiry = True
         self.force_update.add(dev.id)
