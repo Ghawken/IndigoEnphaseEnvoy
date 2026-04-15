@@ -339,6 +339,21 @@ class Plugin(indigo.PluginBase):
                 )
                 valuesDict["token_source"] = ""
 
+            # Credentials changed while in generate-token mode — force a
+            # fresh token so an owner→installer switch takes effect
+            # immediately instead of re-using the old cached token.
+            if new_generate_token:
+                old_user = dev.pluginProps.get("enphase_user", "")
+                old_pass = dev.pluginProps.get("enphase_password", "")
+                new_user = valuesDict.get("enphase_user", "")
+                new_pass = valuesDict.get("enphase_password", "")
+                if old_user != new_user or old_pass != new_pass:
+                    self.logger.info(
+                        f"Enphase credentials changed — clearing saved token to force re-generation."
+                    )
+                    valuesDict["token_source"] = ""
+                    valuesDict["auth_token"] = ""
+
             return (True, valuesDict)
         except Exception:
             self.logger.debug("validateDeviceConfigUi error", exc_info=True)
@@ -411,6 +426,14 @@ class Plugin(indigo.PluginBase):
         dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
 
         self.generated_token.pop(dev.id, None)
+        # Also clear persisted generated token so that credential changes
+        # (e.g. owner → installer) take effect immediately instead of
+        # re-using the old cached token until it expires.
+        if dev.pluginProps.get("token_source") == "generated" and dev.pluginProps.get("auth_token", ""):
+            localProps = dev.pluginProps
+            localProps["auth_token"] = ""
+            localProps["token_source"] = ""
+            dev.replacePluginPropsOnServer(localProps)
         self.log_manual_expiry = True
         self.force_update.add(dev.id)
 
@@ -1550,11 +1573,15 @@ class Plugin(indigo.PluginBase):
                 if self.thePanels is not None:
                     x = 1
                     update_time = t.strftime("%m/%d/%Y at %H:%M")
-                    dev.updateStateOnServer('panelLastUpdated', value=update_time  )
-                    dev.updateStateOnServer('panelLastUpdatedUTC', value=float(t.time())  )                  
+                    envoy_dev = dev  # save ref before 'dev' is shadowed by panel loop
+                    envoy_dev.updateStateOnServer('panelLastUpdated', value=update_time  )
+                    envoy_dev.updateStateOnServer('panelLastUpdatedUTC', value=float(t.time())  )
+                    panel_sns = {str(p['serialNumber']) for p in self.thePanels}
+                    matched = 0
                     for dev in indigo.devices.iter('self.EnphasePanelDevice'):
                         for panel in self.thePanels:
                             if float(dev.states['serialNo']) == float(panel['serialNumber']):
+                                matched += 1
                                 dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(int(panel['lastReportWatts'])))
                                 dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp( int(panel['lastReportDate'])).strftime('%c')))
                                 dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
@@ -1582,6 +1609,12 @@ class Plugin(indigo.PluginBase):
                                     if panel.get('gone') is not None:
                                         # gone=True means inverter is NOT communicating
                                         dev.updateStateOnServer('communicating', value=not panel['gone'])
+                    if self.debugLevel >= 2:
+                        source = self.thePanels[0].get('_source', 'legacy') if self.thePanels else 'unknown'
+                        self.logger.debug(
+                            f"[{envoy_dev.name}] checkThePanels_New: {len(self.thePanels)} panels from {source}, "
+                            f"matched {matched} panel device(s)"
+                        )
 
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+str(error))
