@@ -1568,13 +1568,13 @@ class Plugin(indigo.PluginBase):
                                         ac_w = panel['ac_power_watts']
                                         dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
                                     if panel.get('ac_voltage') is not None:
-                                        ac_v = round(panel['ac_voltage'], 2)
+                                        ac_v = panel['ac_voltage']
                                         dev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
                                     if panel.get('dc_voltage') is not None:
-                                        dc_v = round(panel['dc_voltage'], 2)
+                                        dc_v = panel['dc_voltage']
                                         dev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
                                     if panel.get('dc_current') is not None:
-                                        dc_a = round(panel['dc_current'], 3)
+                                        dc_a = panel['dc_current']
                                         dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a:.3f} A")
                                     if panel.get('temperature') is not None:
                                         temp = panel['temperature']
@@ -1688,7 +1688,7 @@ class Plugin(indigo.PluginBase):
 
         When the data comes from devstatus additional keys are present:
 
-            ac_power (mW), ac_voltage (V), dc_voltage (V),
+            ac_power_watts (W), ac_voltage (V), dc_voltage (V),
             dc_current (A), temperature, gone, _source='devstatus'
         """
         if self.debugLevel >= 2:
