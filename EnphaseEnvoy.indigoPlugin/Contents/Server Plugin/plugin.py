@@ -70,6 +70,8 @@ POWER_FORCED_OFF_TRUE = 1   # production disabled
 # Based on pyenphase (Home Assistant) local API endpoints.
 ENVOY_TARIFF_PATH = "/admin/lib/tariff"
 ENVOY_GRID_RELAY_PATH = "/ivp/ensemble/relay"
+# DPEL (Dynamic Power Export Limiting) endpoint.
+ENVOY_DPEL_PATH = "/ivp/ss/dpel"
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -679,6 +681,227 @@ class Plugin(indigo.PluginBase):
         except Exception as err:
             if self.debugLevel >= 2:
                 self.logger.debug(f"Error polling power production status: {err}")
+
+    def _pollDpelStatus(self, dev):
+        """
+        Poll the DPEL (Dynamic Power Export Limiting) endpoint to keep
+        dpelEnabled and dpelLimitWatts states in sync.
+
+        Reads from GET /ivp/ss/dpel (installer token required).
+        """
+        if not self._is_installer_token(dev):
+            return
+
+        headers = self.create_headers(dev)
+        if not headers:
+            return
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            return
+
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_DPEL_PATH}"
+
+        try:
+            r = self._get(url, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                dpel_settings = data.get('dynamic_pel_settings', {})
+                enabled = dpel_settings.get('enable', False)
+                limit_w = dpel_settings.get('limit_value_W', 0)
+                export_limit = dpel_settings.get('export_limit', True)
+
+                mode_label = "Export" if export_limit else "Production"
+                if enabled:
+                    dev.updateStateOnServer('dpelEnabled',
+                                           value=f"Enabled ({mode_label} Limit)")
+                else:
+                    dev.updateStateOnServer('dpelEnabled', value="Disabled")
+                dev.updateStateOnServer('dpelLimitWatts', value=float(limit_w))
+
+                if self.debugLevel >= 2:
+                    self.logger.debug(
+                        f"DPEL status polled: enabled={enabled}, limit={limit_w}W, mode={mode_label}"
+                    )
+            elif r.status_code in (401, 403):
+                dev.updateStateOnServer('dpelEnabled', value="Status Unavailable")
+                if self.debugLevel >= 1:
+                    self.logger.debug(
+                        f"Cannot poll DPEL status for {dev.name}. HTTP {r.status_code}. "
+                        f"This endpoint requires an installer-level JWT token."
+                    )
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Could not poll DPEL status. HTTP {r.status_code}")
+        except Exception as err:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Error polling DPEL status: {err}")
+
+    def _enableDpel(self, dev, watts, slew_rate=50.0, export_limit=True):
+        """
+        Enable DPEL (Dynamic Power Export Limiting) via POST /ivp/ss/dpel.
+        Requires an installer-level JWT token.
+
+        Based on the vincentwolsink HA integration's enable_dpel method.
+        """
+        headers = self.create_headers(dev)
+        if not headers:
+            self.logger.error(
+                f"No auth token configured for device: {dev.name}. "
+                f"An installer-level JWT token is required for DPEL control."
+            )
+            return False
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            self.logger.error(f"No IP address configured for device: {dev.name}")
+            return False
+
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_DPEL_PATH}"
+        payload = json.dumps({
+            "dynamic_pel_settings": {
+                "enable": True,
+                "export_limit": export_limit,
+                "limit_value_W": float(watts),
+                "slew_rate": float(slew_rate),
+                "enable_dynamic_limiting": False,
+            },
+            "filename": "site_settings",
+            "version": "00.00.01",
+        })
+        headers['Content-Type'] = 'application/json'
+
+        try:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Enabling DPEL for: {dev.name} ({watts}W)")
+
+            host = urlsplit(url).netloc
+            session = self.session_cache[host]
+            r = session.post(url, data=payload, headers=headers,
+                             timeout=self.prefServerTimeout, allow_redirects=True)
+
+            if r.status_code in (200, 204):
+                mode_label = "Export" if export_limit else "Production"
+                indigo.server.log(
+                    f"DPEL enabled for {dev.name}: {watts}W {mode_label} limit"
+                )
+                dev.updateStateOnServer('dpelEnabled',
+                                       value=f"Enabled ({mode_label} Limit)")
+                dev.updateStateOnServer('dpelLimitWatts', value=float(watts))
+                return True
+            elif r.status_code in (401, 403):
+                self.logger.info(
+                    f"Authorization failed enabling DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}. "
+                    f"This endpoint requires an installer-level JWT token."
+                )
+                return False
+            else:
+                self.logger.error(
+                    f"Failed to enable DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}: {r.text}"
+                )
+                return False
+
+        except requests.exceptions.Timeout:
+            self.logger.error(f"Timeout enabling DPEL for: {dev.name}")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.error(f"Connection error enabling DPEL for: {dev.name}")
+            return False
+        except Exception as err:
+            self.logger.error(f"Error enabling DPEL for {dev.name}: {err}")
+            return False
+
+    def _disableDpel(self, dev):
+        """
+        Disable DPEL (Dynamic Power Export Limiting) via POST /ivp/ss/dpel.
+        Requires an installer-level JWT token.
+
+        Based on the vincentwolsink HA integration's disable_dpel method.
+        """
+        headers = self.create_headers(dev)
+        if not headers:
+            self.logger.error(
+                f"No auth token configured for device: {dev.name}. "
+                f"An installer-level JWT token is required for DPEL control."
+            )
+            return False
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            self.logger.error(f"No IP address configured for device: {dev.name}")
+            return False
+
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_DPEL_PATH}"
+        payload = json.dumps({
+            "dynamic_pel_settings": {"enable": False},
+            "filename": "site_settings",
+            "version": "00.00.01",
+        })
+        headers['Content-Type'] = 'application/json'
+
+        try:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Disabling DPEL for: {dev.name}")
+
+            host = urlsplit(url).netloc
+            session = self.session_cache[host]
+            r = session.post(url, data=payload, headers=headers,
+                             timeout=self.prefServerTimeout, allow_redirects=True)
+
+            if r.status_code in (200, 204):
+                indigo.server.log(f"DPEL disabled for {dev.name}")
+                dev.updateStateOnServer('dpelEnabled', value="Disabled")
+                return True
+            elif r.status_code in (401, 403):
+                self.logger.info(
+                    f"Authorization failed disabling DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}. "
+                    f"This endpoint requires an installer-level JWT token."
+                )
+                return False
+            else:
+                self.logger.error(
+                    f"Failed to disable DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}: {r.text}"
+                )
+                return False
+
+        except requests.exceptions.Timeout:
+            self.logger.error(f"Timeout disabling DPEL for: {dev.name}")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.error(f"Connection error disabling DPEL for: {dev.name}")
+            return False
+        except Exception as err:
+            self.logger.error(f"Error disabling DPEL for {dev.name}: {err}")
+            return False
+
+    def enableDpelAction(self, pluginAction):
+        """Action callback: enable DPEL for the selected device."""
+        dev = indigo.devices[pluginAction.deviceId]
+        try:
+            watts = float(pluginAction.props.get('dpelWatts', 0))
+        except (ValueError, TypeError):
+            self.logger.error("Invalid DPEL watt value. Must be a number.")
+            return
+        try:
+            slew_rate = float(pluginAction.props.get('dpelSlewRate', 50))
+        except (ValueError, TypeError):
+            slew_rate = 50.0
+        export_limit = pluginAction.props.get('dpelExportLimit', True)
+        # ConfigUI checkbox returns string 'true'/'false'
+        if isinstance(export_limit, str):
+            export_limit = export_limit.lower() == 'true'
+        self.logger.info(f"Enabling DPEL for {dev.name}: {watts}W, slew={slew_rate}, export_limit={export_limit}")
+        self._enableDpel(dev, watts, slew_rate, export_limit)
+
+    def disableDpelAction(self, pluginAction):
+        """Action callback: disable DPEL for the selected device."""
+        dev = indigo.devices[pluginAction.deviceId]
+        self.logger.info(f"Disabling DPEL for {dev.name}")
+        self._disableDpel(dev)
 
     def _setPowerProduction(self, dev, enable):
         """
@@ -2850,6 +3073,7 @@ class Plugin(indigo.PluginBase):
                     # Override production values with PDM energy if installer token
                     self._applyPdmEnergy(dev)
                     self._pollPowerProductionStatus(dev)
+                    self._pollDpelStatus(dev)
                     # Fetch and parse per-phase meter readings for metered systems
                     if dev.states.get('typeEnvoy') == "Metered":
                         metersData = self.getMetersReadings(dev)

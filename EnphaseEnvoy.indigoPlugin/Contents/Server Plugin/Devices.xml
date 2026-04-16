@@ -447,6 +447,18 @@
         <ControlPageLabel>Meters Readings Available</ControlPageLabel>
       </State>
 
+      <!-- DPEL (Dynamic Power Export Limiting) -->
+      <State id="dpelEnabled">
+        <ValueType>String</ValueType>
+        <TriggerLabel>DPEL Enabled</TriggerLabel>
+        <ControlPageLabel>DPEL Enabled</ControlPageLabel>
+      </State>
+      <State id="dpelLimitWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>DPEL Export Limit (W)</TriggerLabel>
+        <ControlPageLabel>DPEL Export Limit (W)</ControlPageLabel>
+      </State>
+
     </States>
 
     <UiDisplayStateId>powerStatus</UiDisplayStateId>

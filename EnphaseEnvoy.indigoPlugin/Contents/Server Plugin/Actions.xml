@@ -58,5 +58,26 @@
     <Name>Refresh Battery &amp; Grid Data</Name>
     <CallbackMethod>refreshBatteryDataAction</CallbackMethod>
 </Action>
+
+<Action id="enableDpel" deviceFilter="self.EnphaseEnvoyDevice">
+    <Name>Enable DPEL (Export Limiting)</Name>
+    <CallbackMethod>enableDpelAction</CallbackMethod>
+    <ConfigUI>
+      <Field id="dpelWatts" type="textfield" defaultValue="0">
+        <Label>Export Limit (Watts):</Label>
+      </Field>
+      <Field id="dpelSlewRate" type="textfield" defaultValue="50">
+        <Label>Slew Rate:</Label>
+      </Field>
+      <Field id="dpelExportLimit" type="checkbox" defaultValue="true">
+        <Label>Export Limit Mode (unchecked = Production Limit):</Label>
+      </Field>
+    </ConfigUI>
+</Action>
+
+<Action id="disableDpel" deviceFilter="self.EnphaseEnvoyDevice">
+    <Name>Disable DPEL (Export Limiting)</Name>
+    <CallbackMethod>disableDpelAction</CallbackMethod>
+</Action>
 </Actions>
 
