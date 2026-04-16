@@ -2042,6 +2042,12 @@ class Plugin(indigo.PluginBase):
                 if self.debugLevel >= 2:
                     self.logger.debug(f"getthePanels: using device_data endpoint ({len(unified)} inverters)")
                 return unified
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug("getthePanels: device_data returned data but no active inverters, trying next source")
+        else:
+            if self.debugLevel >= 2:
+                self.logger.debug("getthePanels: device_data unavailable, trying next source")
 
         # ── Try devstatus (installer token) ─────────────────────
         if self._is_installer_token(dev):
@@ -2328,9 +2334,11 @@ class Plugin(indigo.PluginBase):
         """
         result = []
         for device in data.values():
-            if not isinstance(device, dict) or not device.get("active", False):
+            if not isinstance(device, dict):
                 continue
             if device.get("devName") != "pcu":
+                continue
+            if not device.get("active", False):
                 continue
 
             dd = {}
@@ -2908,11 +2916,16 @@ class Plugin(indigo.PluginBase):
                     if noDevice:
                         serialNumber = float(array['serialNumber'])
                         update_time = t.strftime("%m/%d/%Y at %H:%M")
+                        report_ts = int(array.get('lastReportDate', 0))
+                        if report_ts > 0:
+                            last_comm = str(datetime.datetime.fromtimestamp(report_ts).strftime('%c'))
+                        else:
+                            last_comm = "No data yet"
                         #self.logger.error(u'SerialNumber:'+str(array['serialNumber']))
                         stateList = [
                             {'key': 'serialNo', 'value': float(array['serialNumber'])},
                             {'key': 'watts', 'value': int(array['lastReportWatts']) },
-                            {'key': 'lastCommunication', 'value': str(datetime.datetime.fromtimestamp(int(array['lastReportDate'])).strftime('%c'))},
+                            {'key': 'lastCommunication', 'value': last_comm},
                             {'key': 'maxWatts', 'value': 0},
                             {'key': 'deviceLastUpdated', 'value': update_time },
                             {'key': 'deviceIsOnline', 'value': True},
