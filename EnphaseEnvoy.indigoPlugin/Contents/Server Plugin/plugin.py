@@ -71,6 +71,8 @@ POWER_FORCED_OFF_TRUE = 1   # production disabled
 ENVOY_TARIFF_PATH = "/admin/lib/tariff"
 ENVOY_GRID_RELAY_PATH = "/ivp/ensemble/relay"
 ENVOY_DPEL_PATH = "/ivp/ss/dpel"
+# If a panel's last report is older than this many seconds, mark it stale/offline.
+PANEL_STALE_THRESHOLD_SECS = 15 * 60  # 15 minutes
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -1912,9 +1914,6 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('panelLastUpdated', value=update_time  )
                     dev.updateStateOnServer('panelLastUpdatedUTC', value=float(t.time())  )
                     now_epoch = int(t.time())
-                    # Threshold: if lastReportDate is older than 15 minutes,
-                    # consider the panel stale/not communicating.
-                    STALE_THRESHOLD_SECS = 15 * 60
                     for paneldev in indigo.devices.iter('self.EnphasePanelDevice'):
                         for panel in self.thePanels:
                             if float(paneldev.states['serialNo']) == float(panel['serialNumber']):
@@ -1925,7 +1924,7 @@ class Plugin(indigo.PluginBase):
                                 is_stale = False
                                 if is_gone:
                                     is_stale = True
-                                elif report_ts > 0 and (now_epoch - report_ts) > STALE_THRESHOLD_SECS:
+                                elif report_ts > 0 and (now_epoch - report_ts) > PANEL_STALE_THRESHOLD_SECS:
                                     is_stale = True
 
                                 if is_stale:
