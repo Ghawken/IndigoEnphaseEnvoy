@@ -1566,6 +1566,66 @@ class Plugin(indigo.PluginBase):
             result = None
             return result
 
+    def getPdmEnergy(self, dev):
+        """
+        Fetch production energy data from /ivp/pdm/energy.
+        This installer-level endpoint returns more accurate production
+        values directly from the power/device manager.
+        Returns the JSON dict, or None on failure.
+        """
+        try:
+            headers = self.create_headers(dev)
+            if not headers:
+                return None
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/pdm/energy"
+            r = self._get(url, timeout=35, headers=headers)
+            if r.status_code == 200:
+                result = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"PDM Energy Result: {result}")
+                return result
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"PDM Energy returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching PDM energy: {error}", exc_info=True)
+            return None
+
+    def _applyPdmEnergy(self, dev):
+        """
+        If an installer-level token is available, fetch /ivp/pdm/energy
+        and override the production values with the more accurate PDM data.
+        Based on the vincentwolsink HA integration's path_by_token pattern
+        that prefers pdm_energy.production.pcu for installer tokens.
+        """
+        if not self._is_installer_token(dev):
+            return
+        pdm = self.getPdmEnergy(dev)
+        if pdm is None:
+            return
+        try:
+            pcu = pdm.get("production", {}).get("pcu", {})
+            if not pcu:
+                return
+            updates = []
+            if "wattsNow" in pcu:
+                updates.append({'key': 'productionWattsNow', 'value': int(pcu['wattsNow'])})
+            if "wattHoursToday" in pcu:
+                updates.append({'key': 'productionWattsToday', 'value': int(pcu['wattHoursToday'])})
+            if "wattHoursLifetime" in pcu:
+                updates.append({'key': 'productionwhLifetime', 'value': int(pcu['wattHoursLifetime'])})
+            if "wattHoursSevenDays" in pcu:
+                updates.append({'key': 'production7days', 'value': int(pcu['wattHoursSevenDays'])})
+            if updates:
+                dev.updateStatesOnServer(updates)
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Production values overridden from PDM energy: {updates}")
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Error applying PDM energy data: {error}", exc_info=True)
+
     def checkThePanels_New(self,dev, thePanels=None):
         if self.debugLevel >= 2:
             self.logger.debug(u'check thepanels called')
@@ -2787,6 +2847,8 @@ class Plugin(indigo.PluginBase):
                         self.logger.debug(u"Online: Refreshing device: {0}".format(dev.name))
                     data = self.gettheDataChoice(dev)
                     self.parseStateValues(dev, data)
+                    # Override production values with PDM energy if installer token
+                    self._applyPdmEnergy(dev)
                     self._pollPowerProductionStatus(dev)
                     # Fetch and parse per-phase meter readings for metered systems
                     if dev.states.get('typeEnvoy') == "Metered":
