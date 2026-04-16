@@ -459,7 +459,11 @@
         <TriggerLabel>Meters Readings Available</TriggerLabel>
         <ControlPageLabel>Meters Readings Available</ControlPageLabel>
       </State>
-
+      <State id="envoyPollingInterval">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Envoy Polling Interval (s)</TriggerLabel>
+        <ControlPageLabel>Envoy Polling Interval (s)</ControlPageLabel>
+      </State>
     </States>
 
     <UiDisplayStateId>powerStatus</UiDisplayStateId>

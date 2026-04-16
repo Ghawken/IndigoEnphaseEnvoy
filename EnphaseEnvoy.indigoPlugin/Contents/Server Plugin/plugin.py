@@ -71,6 +71,7 @@ POWER_FORCED_OFF_TRUE = 1   # production disabled
 ENVOY_TARIFF_PATH = "/admin/lib/tariff"
 ENVOY_GRID_RELAY_PATH = "/ivp/ensemble/relay"
 ENVOY_DPEL_PATH = "/ivp/ss/dpel"
+PANEL_STALE_THRESHOLD_SECS = 15 * 60  # 15 minutes
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -736,6 +737,52 @@ class Plugin(indigo.PluginBase):
             if self.debugLevel >= 2:
                 self.logger.debug(f"Error polling DPEL status: {err}")
 
+    def _fetchPollingInterval(self, dev):
+        """
+        Fetch the Envoy's internal polling/scan interval from /ivp/peb/newscan.
+        Requires an installer-level token.  Called once at startup; stores the
+        result in the envoyPollingInterval device state.
+        """
+        if not self._is_installer_token(dev):
+            self.logger.debug(f"[{dev.name}] Skipping polling interval fetch — not an installer token.")
+            return
+        headers = self.create_headers(dev)
+        if not headers:
+            return
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            return
+        url = f"http{self.https_flag}://{ip_address}/ivp/peb/newscan"
+        try:
+            r = self._get(url, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                # Response is {"newDeviceScan": {"polling-period-secs": 900, ...}}
+                interval = 0
+                if isinstance(data, dict):
+                    scan_data = data.get('newDeviceScan', data)
+                    if isinstance(scan_data, dict):
+                        interval = scan_data.get('polling-period-secs',
+                                       scan_data.get('period',
+                                       scan_data.get('interval', 0)))
+                    else:
+                        interval = 0
+                elif isinstance(data, (int, float)):
+                    interval = int(data)
+                dev.updateStateOnServer('envoyPollingInterval', value=int(interval))
+                self.logger.info(f"[{dev.name}] Envoy polling interval: {interval}s")
+            elif r.status_code in (401, 403):
+                self.logger.debug(
+                    f"[{dev.name}] Cannot fetch polling interval — HTTP {r.status_code}. "
+                    f"Requires installer-level token."
+                )
+            else:
+                self.logger.debug(f"[{dev.name}] Polling interval endpoint returned HTTP {r.status_code}")
+        except Exception as err:
+            self.logger.debug(f"[{dev.name}] Error fetching polling interval: {err}")
+
+
+
     def _enableDpel(self, dev, watts, slew_rate=50.0, export_limit=True):
         """
         Enable DPEL (Dynamic Power Export Limiting) via POST /ivp/ss/dpel.
@@ -1189,6 +1236,11 @@ class Plugin(indigo.PluginBase):
                 if dev.enabled:
                     self.refreshDataForDev(dev)
                     self.sleep(5)
+                    # One-time: fetch Envoy polling interval from /ivp/peb/newscan
+                    try:
+                        self._fetchPollingInterval(dev)
+                    except Exception:
+                        self.logger.debug("Could not fetch polling interval at startup.", exc_info=True)
 
             for dev in indigo.devices.iter('self.EnphaseEnvoyLegacy'):
                 if dev.enabled:
@@ -1452,7 +1504,7 @@ class Plugin(indigo.PluginBase):
         # detection of endpoint if not already known
         try:
             if self.endpoint_type == "":
-                self.detect_model()
+                self.detect_model(dev)
             response =  requests.get(self.endpoint_url, timeout=15,verify=False,  allow_redirects=True)
             if self.endpoint_type == "P" or self.endpoint_type == "PC":
                 return response.json()  # these Envoys have .json
@@ -1673,7 +1725,7 @@ class Plugin(indigo.PluginBase):
             self.serial_number_last_six[dev.id] = serial_num[-6:]
             self.serial_number_full[dev.id] = serial_num
             self.logger.debug("Found 6 digit Serial Number:" + str(self.serial_number_last_six[dev.id]))
-            self.logger.info(f"[{dev.name}] Found Full Enphase Envoy Serial Number:" + str(self.serial_number_ful[dev.id]))
+            self.logger.info(f"[{dev.name}] Found Full Enphase Envoy Serial Number:" + str(self.serial_number_full[dev.id]))
             return serial_num[-6:]
 
     def gettheDataChoice(self,dev):
@@ -1862,70 +1914,93 @@ class Plugin(indigo.PluginBase):
                     x = 1
                     update_time = t.strftime("%m/%d/%Y at %H:%M")
                     dev.updateStateOnServer('panelLastUpdated', value=update_time  )
-                    dev.updateStateOnServer('panelLastUpdatedUTC', value=float(t.time())  )                  
-                    for dev in indigo.devices.iter('self.EnphasePanelDevice'):
+                    dev.updateStateOnServer('panelLastUpdatedUTC', value=float(t.time())  )
+                    now_epoch = int(t.time())
+                    for paneldev in indigo.devices.iter('self.EnphasePanelDevice'):
                         for panel in self.thePanels:
-                            if float(dev.states['serialNo']) == float(panel['serialNumber']):
-                                #self.logger.error(u'Matched Panel Found:'+str(panel['serialNumber']))
-                                #deviceName = 'Enphase SolarPanel ' + str(x)
-                                #self.logger.error(u"Enphase Panel SN:"+str(str(panel['serialNumber'])))
-                                #if dev.states['producing']:
-                                dev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(panel['lastReportWatts']))
+                            if float(paneldev.states['serialNo']) == float(panel['serialNumber']):
+                                report_ts = int(panel.get('lastReportDate', 0))
+                                is_gone = bool(panel.get('gone', False))
+
+                                # Determine if panel data is stale
+                                is_stale = False
+                                if is_gone:
+                                    is_stale = True
+                                elif report_ts > 0 and (now_epoch - report_ts) > PANEL_STALE_THRESHOLD_SECS:
+                                    is_stale = True
+
+                                if is_stale:
+                                    # Panel is not communicating or data is stale
+                                    paneldev.updateStateOnServer('watts', value=0, uiValue='0')
+                                    paneldev.updateStateOnServer('communicating', value=False)
+                                    paneldev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+                                    paneldev.updateStateOnServer('deviceLastUpdated', value=update_time)
+                                    paneldev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
+                                    # Preserve the last known communication time
+                                    if report_ts > 0:
+                                        paneldev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
+                                    if self.debugLevel >= 1:
+                                        age_mins = round((now_epoch - report_ts) / 60, 1) if report_ts > 0 else "N/A"
+                                        self.logger.debug(
+                                            f"Panel {panel['serialNumber']} marked stale/offline "
+                                            f"(gone={is_gone}, last_report_age={age_mins} min)")
+                                    continue
+
+                                # Panel is online and current
+                                paneldev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(panel['lastReportWatts']))
                                 # Only update lastCommunication when the timestamp is valid (> 0).
                                 # Devstatus returns last_reading=0 for offline/gone inverters;
                                 # converting 0 to a date produces "Jan 1 1970" which is misleading.
                                 # Keeping the previous value preserves the real last-seen time.
-                                report_ts = int(panel.get('lastReportDate', 0))
                                 if report_ts > 0:
-                                    dev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
-                                #dev.updateStateOnServer('serialNo', value=float(panel['serialNumber']))
-                                dev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
-                                dev.updateStateOnServer('deviceLastUpdated', value=update_time)
-                                dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
-                                dev.setErrorStateOnServer(None)
+                                    paneldev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
+                                paneldev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
+                                paneldev.updateStateOnServer('deviceLastUpdated', value=update_time)
+                                paneldev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
+                                paneldev.setErrorStateOnServer(None)
 
 
                                 # Extra extended fields (present when data from device_data or devstatus)
                                 if panel.get('_source') in ('device_data', 'devstatus'):
                                     if panel.get('ac_power_watts') is not None:
                                         ac_w = panel['ac_power_watts']
-                                        dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
+                                        paneldev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
                                     if panel.get('ac_voltage') is not None:
                                         ac_v = round(panel['ac_voltage'], 2)
-                                        dev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
+                                        paneldev.updateStateOnServer('acVoltage', value=ac_v, uiValue=f"{ac_v} V")
                                     if panel.get('dc_voltage') is not None:
                                         dc_v = round(panel['dc_voltage'], 2)
-                                        dev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
+                                        paneldev.updateStateOnServer('dcVoltage', value=dc_v, uiValue=f"{dc_v} V")
                                     if panel.get('dc_current') is not None:
                                         dc_a = round(panel['dc_current'], 3)
-                                        dev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a} A")
+                                        paneldev.updateStateOnServer('dcCurrent', value=dc_a, uiValue=f"{dc_a} A")
                                     if panel.get('temperature') is not None:
                                         temp = panel['temperature']
-                                        dev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
+                                        paneldev.updateStateOnServer('temperature', value=temp, uiValue=f"{temp} °C")
                                     if panel.get('gone') is not None:
                                         # gone=True means inverter is NOT communicating
-                                        dev.updateStateOnServer('communicating', value=not panel['gone'])
+                                        paneldev.updateStateOnServer('communicating', value=not panel['gone'])
                                     # device_data-only extended fields
                                     if panel.get('ac_current') is not None:
                                         ac_a = round(panel['ac_current'], 3)
-                                        dev.updateStateOnServer('acCurrent', value=ac_a, uiValue=f"{ac_a} A")
+                                        paneldev.updateStateOnServer('acCurrent', value=ac_a, uiValue=f"{ac_a} A")
                                     if panel.get('ac_frequency') is not None:
                                         ac_hz = round(panel['ac_frequency'], 3)
-                                        dev.updateStateOnServer('acFrequency', value=ac_hz, uiValue=f"{ac_hz} Hz")
+                                        paneldev.updateStateOnServer('acFrequency', value=ac_hz, uiValue=f"{ac_hz} Hz")
                                     if panel.get('watt_hours_today') is not None:
-                                        dev.updateStateOnServer('wattHoursToday', value=int(panel['watt_hours_today']))
+                                        paneldev.updateStateOnServer('wattHoursToday', value=int(panel['watt_hours_today']))
                                     if panel.get('watt_hours_week') is not None:
-                                        dev.updateStateOnServer('wattHoursWeek', value=int(panel['watt_hours_week']))
+                                        paneldev.updateStateOnServer('wattHoursWeek', value=int(panel['watt_hours_week']))
                                     if panel.get('lifetime_power') is not None:
-                                        dev.updateStateOnServer('lifetimeEnergy', value=int(panel['lifetime_power']))
+                                        paneldev.updateStateOnServer('lifetimeEnergy', value=int(panel['lifetime_power']))
 
 
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+str(error))
                 if self.debugLevel >= 2:
                     self.logger.debug(u"Device is offline. No data to return. ", exc_info=True)
-                dev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
-                dev.setErrorStateOnServer(u'Offline')
+                paneldev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
+                paneldev.setErrorStateOnServer(u'Offline')
                 result = None
 
                 return result
@@ -2141,7 +2216,7 @@ class Plugin(indigo.PluginBase):
 
     def _getthePanels_legacy(self, dev):
         """Fetch panel data from the legacy /api/v1/production/inverters endpoint."""
-        if self.serial_number_last_six == "":
+        if self.serial_number_last_six.get(dev.id, "") == "":
             if self.get_serial_number(dev):
                 self.logger.debug("Found the correct Serial Number.  Continuing.")
             else:
