@@ -2359,27 +2359,28 @@ class Plugin(indigo.PluginBase):
             lr = ch.get("lastReading", {})
             dd["last_reading"] = lr.get("endDate", 0)
 
-            ac_v = lr.get("acVoltageINmV")
-            dd["ac_voltage"] = int(ac_v) / 1000 if ac_v is not None else None
+            # Helper: safe milli-unit conversion (mV→V, mA→A, mHz→Hz)
+            def _milli(val):
+                try:
+                    return float(val) / 1000
+                except (ValueError, TypeError):
+                    return None
 
-            ac_f = lr.get("acFrequencyINmHz")
-            dd["ac_frequency"] = int(ac_f) / 1000 if ac_f is not None else None
-
-            ac_i = lr.get("acCurrentInmA")
-            dd["ac_current"] = int(ac_i) / 1000 if ac_i is not None else None
-
-            dc_v = lr.get("dcVoltageINmV")
-            dd["dc_voltage"] = int(dc_v) / 1000 if dc_v is not None else None
-
-            dc_i = lr.get("dcCurrentINmA")
-            dd["dc_current"] = int(dc_i) / 1000 if dc_i is not None else None
+            dd["ac_voltage"] = _milli(lr.get("acVoltageINmV"))
+            dd["ac_frequency"] = _milli(lr.get("acFrequencyINmHz"))
+            dd["ac_current"] = _milli(lr.get("acCurrentInmA"))
+            dd["dc_voltage"] = _milli(lr.get("dcVoltageINmV"))
+            dd["dc_current"] = _milli(lr.get("dcCurrentINmA"))
 
             dd["temperature"] = lr.get("channelTemp")
 
-            # lifetime energy: joules -> Wh
+            # lifetime energy: joules -> Wh (1 J = 0.000277778 Wh)
             lifetime = ch.get("lifetime", {})
             joules = lifetime.get("joulesProduced")
-            dd["lifetime_power"] = round(int(joules) * 0.000277778) if joules is not None else None
+            try:
+                dd["lifetime_power"] = round(float(joules) / 3600) if joules is not None else None
+            except (ValueError, TypeError):
+                dd["lifetime_power"] = None
 
             result.append(dd)
             if self.debugLevel >= 2:
