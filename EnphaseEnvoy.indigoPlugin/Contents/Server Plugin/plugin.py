@@ -864,6 +864,7 @@ class Plugin(indigo.PluginBase):
         self.WaitInterval = 360
         endpoints = [ "http{}://{}/ivp/pdm/energy",
                       "http{}://{}/ivp/pdm/production",
+                      "http{}://{}/ivp/pdm/device_data",
             "http{}://{}/production.json",
                       "http{}://{}/production",
                       "http{}://{}/inventory.json",
@@ -875,6 +876,8 @@ class Plugin(indigo.PluginBase):
                       "http{}://{}/ivp/ensemble/inventory",
                       "http{}://{}/ivp/livedata/status",
                       "http{}://{}/ivp/meters/reports/consumption",
+                      "http{}://{}/ivp/peb/devstatus",
+                      "http{}://{}/ivp/ss/dpel",
                       "http{}://{}/info.xml"
                       ]
         success = []
@@ -1599,8 +1602,8 @@ class Plugin(indigo.PluginBase):
                                 dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
                                 dev.setErrorStateOnServer(None)
 
-                                # Extra devstatus fields (present when data from /ivp/peb/devstatus)
-                                if panel.get('_source') == 'devstatus':
+                                # Extra extended fields (present when data from device_data or devstatus)
+                                if panel.get('_source') in ('device_data', 'devstatus'):
                                     if panel.get('ac_power_watts') is not None:
                                         ac_w = panel['ac_power_watts']
                                         dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
@@ -1619,6 +1622,19 @@ class Plugin(indigo.PluginBase):
                                     if panel.get('gone') is not None:
                                         # gone=True means inverter is NOT communicating
                                         dev.updateStateOnServer('communicating', value=not panel['gone'])
+                                    # device_data-only extended fields
+                                    if panel.get('ac_current') is not None:
+                                        ac_a = round(panel['ac_current'], 3)
+                                        dev.updateStateOnServer('acCurrent', value=ac_a, uiValue=f"{ac_a} A")
+                                    if panel.get('ac_frequency') is not None:
+                                        ac_hz = round(panel['ac_frequency'], 3)
+                                        dev.updateStateOnServer('acFrequency', value=ac_hz, uiValue=f"{ac_hz} Hz")
+                                    if panel.get('watt_hours_today') is not None:
+                                        dev.updateStateOnServer('wattHoursToday', value=int(panel['watt_hours_today']))
+                                    if panel.get('watt_hours_week') is not None:
+                                        dev.updateStateOnServer('wattHoursWeek', value=int(panel['watt_hours_week']))
+                                    if panel.get('lifetime_power') is not None:
+                                        dev.updateStateOnServer('lifetimeEnergy', value=int(panel['lifetime_power']))
 
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+str(error))
@@ -1709,23 +1725,25 @@ class Plugin(indigo.PluginBase):
     def getthePanels(self, dev):
         """Fetch per-inverter panel data.
 
-        When an installer-level token is available the preferred
-        ``/ivp/peb/devstatus`` endpoint is tried first — it returns
-        more accurate, more up-to-date data including AC power,
-        DC voltage/current, temperature, etc.
+        Tries endpoints in order of richness:
 
-        If that fails or the token is owner-level, fall back to
-        ``/api/v1/production/inverters``.
+        1. ``/ivp/pdm/device_data`` — available with any token.
+           Returns watts, watts_max, wattHours today/week,
+           AC voltage/current/frequency, DC voltage/current,
+           temperature, lifetime energy, RSSI, etc.
+
+        2. ``/ivp/peb/devstatus`` — installer token only.
+           Returns AC power, DC voltage/current, temperature.
+
+        3. ``/api/v1/production/inverters`` — legacy fallback.
 
         Returns a list of dicts in a **unified format** that always
         contains the standard keys used by callers:
 
             serialNumber, lastReportWatts, lastReportDate, maxReportWatts
 
-        When the data comes from devstatus additional keys are present:
-
-            ac_power (mW), ac_voltage (V), dc_voltage (V),
-            dc_current (A), temperature, gone, _source='devstatus'
+        When data comes from device_data or devstatus, additional keys
+        are present for extended panel states.
         """
         if self.debugLevel >= 2:
             self.logger.debug(u"getthePanels Enphase Envoy method called.")
@@ -1733,7 +1751,16 @@ class Plugin(indigo.PluginBase):
         if not dev.states['deviceIsOnline']:
             return None
 
-        # ── Try devstatus first (installer token) ───────────────
+        # ── Try device_data first (any token, richest data) ─────
+        device_data = self.getDeviceData(dev)
+        if device_data:
+            unified = self._devicedata_to_unified(device_data)
+            if unified:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"getthePanels: using device_data endpoint ({len(unified)} inverters)")
+                return unified
+
+        # ── Try devstatus (installer token) ─────────────────────
         if self._is_installer_token(dev):
             devstatus = self.getDevStatus(dev)
             if devstatus:
@@ -1742,13 +1769,44 @@ class Plugin(indigo.PluginBase):
                     if self.debugLevel >= 2:
                         self.logger.debug(f"getthePanels: using devstatus endpoint ({len(unified)} inverters)")
                     return unified
-                # devstatus parsed but produced no usable records – fall through
-            # devstatus unavailable/failed – fall through to legacy
 
         # ── Legacy endpoint ─────────────────────────────────────
         return self._getthePanels_legacy(dev)
 
-        # ---------------------------------------------------------
+    def _devicedata_to_unified(self, devicedata_list):
+        """Convert parseDeviceData() output into the unified panel format.
+
+        Adds the standard keys (serialNumber, lastReportWatts,
+        lastReportDate, maxReportWatts) expected by callers,
+        plus extended keys for the richer device_data fields.
+        """
+        result = []
+        for dd in devicedata_list:
+            sn = dd.get("sn")
+            if sn is None:
+                continue
+            panel = {
+                # standard keys expected everywhere
+                "serialNumber": sn,
+                "lastReportWatts": dd.get("watts", 0),
+                "lastReportDate": dd.get("last_reading", 0),
+                "maxReportWatts": dd.get("watts_max", 0),
+                # extended device_data fields
+                "ac_power_watts": dd.get("watts", 0),
+                "ac_voltage": round(dd["ac_voltage"], 2) if dd.get("ac_voltage") is not None else None,
+                "ac_current": round(dd["ac_current"], 3) if dd.get("ac_current") is not None else None,
+                "ac_frequency": round(dd["ac_frequency"], 3) if dd.get("ac_frequency") is not None else None,
+                "dc_voltage": round(dd["dc_voltage"], 2) if dd.get("dc_voltage") is not None else None,
+                "dc_current": round(dd["dc_current"], 3) if dd.get("dc_current") is not None else None,
+                "temperature": dd.get("temperature"),
+                "watt_hours_today": dd.get("watt_hours_today"),
+                "watt_hours_week": dd.get("watt_hours_week"),
+                "lifetime_power": dd.get("lifetime_power"),
+                "gone": dd.get("gone"),
+                "_source": "device_data",
+            }
+            result.append(panel)
+        return result if result else None
 
     def _devstatus_to_unified(self, devstatus_list):
         """Convert parseDevStatus() output into the unified panel format.
@@ -1792,8 +1850,6 @@ class Plugin(indigo.PluginBase):
             }
             result.append(panel)
         return result if result else None
-
-        # ---------------------------------------------------------
 
     def _getthePanels_legacy(self, dev):
         """Fetch panel data from the legacy /api/v1/production/inverters endpoint."""
@@ -1938,6 +1994,113 @@ class Plugin(indigo.PluginBase):
                 result.append(device_data)
                 if self.debugLevel >= 2:
                     self.logger.debug(f"Parsed devstatus inverter: {device_data}")
+
+        return result if result else None
+
+    def getDeviceData(self, dev):
+        """
+        Fetch per-inverter data from /ivp/pdm/device_data.
+        This endpoint is available with any token (not installer-only)
+        and returns the richest per-inverter data: watts, watts_max,
+        wattHours today/yesterday/week, AC/DC voltage/current,
+        temperature, lifetime energy, RSSI, and more.
+        Returns the parsed list of device dicts, or None on failure.
+        """
+        try:
+            headers = self.create_headers(dev)
+            if not headers:
+                return None
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/pdm/device_data"
+            r = self._get(url, timeout=35, headers=headers)
+            if r.status_code == 200:
+                raw = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"DeviceData raw result: {raw}")
+                return self.parseDeviceData(raw)
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"DeviceData returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching device_data: {error}", exc_info=True)
+            return None
+
+    def parseDeviceData(self, data):
+        """
+        Parse the /ivp/pdm/device_data response into a list of device dicts.
+        Based on the vincentwolsink HA integration's parse_devicedata function.
+
+        The response is a dict keyed by device EID, each value containing:
+          devName, sn, active, modGone, channels[0].watts.now/max,
+          channels[0].wattHours.today/yesterday/week,
+          channels[0].lastReading.{acVoltageINmV, acFrequencyINmHz, ...}
+          channels[0].lifetime.joulesProduced
+
+        Returns a list of dicts with keys:
+          sn, watts, watts_max, watt_hours_today, watt_hours_yesterday,
+          watt_hours_week, ac_voltage, ac_frequency, ac_current,
+          dc_voltage, dc_current, temperature, lifetime_power,
+          gone, last_reading
+        """
+        result = []
+        for device in data.values():
+            if not isinstance(device, dict) or not device.get("active", False):
+                continue
+            if device.get("devName") != "pcu":
+                continue
+
+            dd = {}
+            dd["sn"] = device.get("sn")
+            dd["gone"] = device.get("modGone", False)
+
+            channels = device.get("channels")
+            if not channels or not isinstance(channels, list):
+                result.append(dd)
+                continue
+
+            ch = channels[0]
+
+            # watts.now and watts.max
+            watts_info = ch.get("watts", {})
+            dd["watts"] = watts_info.get("now", 0)
+            dd["watts_max"] = watts_info.get("max", 0)
+
+            # wattHours
+            wh = ch.get("wattHours", {})
+            dd["watt_hours_today"] = wh.get("today", 0)
+            dd["watt_hours_yesterday"] = wh.get("yesterday", 0)
+            dd["watt_hours_week"] = wh.get("week", 0)
+
+            # lastReading - with mV/mA/mHz conversion
+            lr = ch.get("lastReading", {})
+            dd["last_reading"] = lr.get("endDate", 0)
+
+            ac_v = lr.get("acVoltageINmV")
+            dd["ac_voltage"] = int(ac_v) / 1000 if ac_v is not None else None
+
+            ac_f = lr.get("acFrequencyINmHz")
+            dd["ac_frequency"] = int(ac_f) / 1000 if ac_f is not None else None
+
+            ac_i = lr.get("acCurrentInmA")
+            dd["ac_current"] = int(ac_i) / 1000 if ac_i is not None else None
+
+            dc_v = lr.get("dcVoltageINmV")
+            dd["dc_voltage"] = int(dc_v) / 1000 if dc_v is not None else None
+
+            dc_i = lr.get("dcCurrentINmA")
+            dd["dc_current"] = int(dc_i) / 1000 if dc_i is not None else None
+
+            dd["temperature"] = lr.get("channelTemp")
+
+            # lifetime energy: joules -> Wh
+            lifetime = ch.get("lifetime", {})
+            joules = lifetime.get("joulesProduced")
+            dd["lifetime_power"] = round(int(joules) * 0.000277778) if joules is not None else None
+
+            result.append(dd)
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Parsed device_data inverter: {dd}")
 
         return result if result else None
 

@@ -622,6 +622,31 @@
         <TriggerLabel>AC Power (W)</TriggerLabel>
         <ControlPageLabel>AC Power (W)</ControlPageLabel>
       </State>
+      <State id="acFrequency">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>AC Frequency (Hz)</TriggerLabel>
+        <ControlPageLabel>AC Frequency (Hz)</ControlPageLabel>
+      </State>
+      <State id="acCurrent">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>AC Current (A)</TriggerLabel>
+        <ControlPageLabel>AC Current (A)</ControlPageLabel>
+      </State>
+      <State id="wattHoursToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Energy Today (Wh)</TriggerLabel>
+        <ControlPageLabel>Energy Today (Wh)</ControlPageLabel>
+      </State>
+      <State id="wattHoursWeek">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Energy This Week (Wh)</TriggerLabel>
+        <ControlPageLabel>Energy This Week (Wh)</ControlPageLabel>
+      </State>
+      <State id="lifetimeEnergy">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Lifetime Energy (Wh)</TriggerLabel>
+        <ControlPageLabel>Lifetime Energy (Wh)</ControlPageLabel>
+      </State>
 
     </States>
 
