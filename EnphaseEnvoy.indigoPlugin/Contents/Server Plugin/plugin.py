@@ -1916,6 +1916,23 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('panelLastUpdated', value=update_time  )
                     dev.updateStateOnServer('panelLastUpdatedUTC', value=float(t.time())  )
                     now_epoch = int(t.time())
+
+                    # Log average data freshness for debugging
+                    if self.debugLevel >= 1:
+                        ages = []
+                        for p in self.thePanels:
+                            ts = int(p.get('lastReportDate', 0))
+                            if ts > 0:
+                                ages.append(now_epoch - ts)
+                        if ages:
+                            avg_age = sum(ages) / len(ages)
+                            max_age = max(ages)
+                            src = next((p.get('_source', 'legacy') for p in self.thePanels), 'unknown')
+                            self.logger.debug(
+                                f"Panel data freshness: avg={avg_age:.0f}s ({avg_age/60:.1f}m), "
+                                f"max={max_age:.0f}s ({max_age/60:.1f}m), "
+                                f"source={src}, panels={len(ages)}"
+                            )
                     for paneldev in indigo.devices.iter('self.EnphasePanelDevice'):
                         for panel in self.thePanels:
                             if float(paneldev.states['serialNo']) == float(panel['serialNumber']):
@@ -2084,25 +2101,31 @@ class Plugin(indigo.PluginBase):
     def getthePanels(self, dev):
         """Fetch per-inverter panel data.
 
-        Tries endpoints in order of richness:
+        Uses ``/api/v1/production/inverters`` as the **primary** source
+        because it provides **near-real-time** watt/timestamp readings
+        (typically < 1 minute delay).  The richer endpoints
+        (``/ivp/pdm/device_data`` and ``/ivp/peb/devstatus``) are
+        known to be delayed by ~15-30 minutes on many firmware
+        versions, so they are used only to **enrich** the real-time
+        data with extended fields (AC/DC voltage, current, temperature,
+        wattHours, lifetime energy, etc.).
 
-        1. ``/ivp/pdm/device_data`` — available with any token.
-           Returns watts, watts_max, wattHours today/week,
-           AC voltage/current/frequency, DC voltage/current,
-           temperature, lifetime energy, RSSI, etc.
+        Endpoint strategy:
 
-        2. ``/ivp/peb/devstatus`` — installer token only.
-           Returns AC power, DC voltage/current, temperature.
-
-        3. ``/api/v1/production/inverters`` — legacy fallback.
+        1. ``/api/v1/production/inverters`` — real-time watts &
+           timestamps (primary source).
+        2. ``/ivp/pdm/device_data`` (any token) or
+           ``/ivp/peb/devstatus`` (installer token) — merged in for
+           extended fields only.  Real-time watts/timestamps from
+           step 1 are **never overwritten** by these slower endpoints.
 
         Returns a list of dicts in a **unified format** that always
         contains the standard keys used by callers:
 
             serialNumber, lastReportWatts, lastReportDate, maxReportWatts
 
-        When data comes from device_data or devstatus, additional keys
-        are present for extended panel states.
+        When enrichment data is available, additional keys are present
+        for extended panel states.
         """
         if self.debugLevel >= 2:
             self.logger.debug(u"getthePanels Enphase Envoy method called.")
@@ -2110,27 +2133,104 @@ class Plugin(indigo.PluginBase):
         if not dev.states['deviceIsOnline']:
             return None
 
-        # ── Try device_data first (any token, richest data) ─────
+        # ── 1. Real-time data from /api/v1/production/inverters ──
+        realtime = self._getthePanels_legacy(dev)
+        source = "inverters"
+
+        if realtime:
+            # Build a serial-number → dict lookup for the real-time data
+            rt_by_sn = {str(p['serialNumber']): p for p in realtime}
+
+            # ── 2. Enrich with extended data ─────────────────────
+            enriched = False
+
+            # Try device_data first (any token, richest extended data)
+            device_data = self.getDeviceData(dev)
+            if device_data:
+                unified_ext = self._devicedata_to_unified(device_data)
+                if unified_ext:
+                    self._enrich_panels(rt_by_sn, unified_ext, "device_data")
+                    enriched = True
+                    source = "inverters+device_data"
+
+            # If device_data was not available, try devstatus (installer token)
+            if not enriched and self._is_installer_token(dev):
+                devstatus = self.getDevStatus(dev)
+                if devstatus:
+                    unified_ext = self._devstatus_to_unified(devstatus)
+                    if unified_ext:
+                        self._enrich_panels(rt_by_sn, unified_ext, "devstatus")
+                        enriched = True
+                        source = "inverters+devstatus"
+
+            # Update the data-source state on the Envoy device
+            try:
+                dev.updateStateOnServer('panelDataSource', value=source)
+            except Exception:
+                pass  # state may not exist on older device configs
+
+            if self.debugLevel >= 2:
+                self.logger.debug(
+                    f"getthePanels: returning {len(realtime)} inverters "
+                    f"(source={source})"
+                )
+            return realtime
+
+        # ── Fallback: if the legacy endpoint failed entirely, try ──
+        # ── the richer endpoints as sole data sources.             ──
+        self.logger.debug("getthePanels: /api/v1/production/inverters unavailable, falling back to device_data/devstatus")
+
         device_data = self.getDeviceData(dev)
         if device_data:
             unified = self._devicedata_to_unified(device_data)
             if unified:
+                source = "device_data"
+                try:
+                    dev.updateStateOnServer('panelDataSource', value=source)
+                except Exception:
+                    pass
                 if self.debugLevel >= 2:
                     self.logger.debug(f"getthePanels: using device_data endpoint ({len(unified)} inverters)")
                 return unified
 
-        # ── Try devstatus (installer token) ─────────────────────
         if self._is_installer_token(dev):
             devstatus = self.getDevStatus(dev)
             if devstatus:
                 unified = self._devstatus_to_unified(devstatus)
                 if unified:
+                    source = "devstatus"
+                    try:
+                        dev.updateStateOnServer('panelDataSource', value=source)
+                    except Exception:
+                        pass
                     if self.debugLevel >= 2:
                         self.logger.debug(f"getthePanels: using devstatus endpoint ({len(unified)} inverters)")
                     return unified
 
-        # ── Legacy endpoint ─────────────────────────────────────
-        return self._getthePanels_legacy(dev)
+        return None
+
+    def _enrich_panels(self, rt_by_sn, extended_list, ext_source):
+        """Merge extended fields into real-time panel dicts **without**
+        overwriting the real-time watts or timestamp.
+
+        *rt_by_sn* is a {serialNumber: dict} lookup of real-time data.
+        *extended_list* is the unified list from device_data or devstatus.
+        *ext_source* is 'device_data' or 'devstatus' — stored as ``_source``.
+
+        Only keys that are **not** part of the core real-time set
+        (serialNumber, lastReportWatts, lastReportDate, maxReportWatts)
+        are copied from the extended data.  This preserves the near-
+        real-time readings while adding temperature, voltage, etc.
+        """
+        CORE_KEYS = {'serialNumber', 'lastReportWatts', 'lastReportDate', 'maxReportWatts'}
+        for ext in extended_list:
+            sn = str(ext.get('serialNumber', ''))
+            if sn in rt_by_sn:
+                panel = rt_by_sn[sn]
+                for key, value in ext.items():
+                    if key not in CORE_KEYS:
+                        panel[key] = value
+                panel['_source'] = ext_source
 
 
     def _devicedata_to_unified(self, devicedata_list):

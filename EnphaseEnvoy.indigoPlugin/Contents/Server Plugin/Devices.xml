@@ -196,6 +196,11 @@
         <TriggerLabel>DateTime of last Panel Check</TriggerLabel>
         <ControlPageLabel>DateTime of last Panel Check</ControlPageLabel>
       </State>
+        <State id="panelDataSource">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Panel Data Source Endpoint</TriggerLabel>
+        <ControlPageLabel>Panel Data Source Endpoint</ControlPageLabel>
+      </State>
       <State id="consumptionWattsNow">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power consumption (watts)</TriggerLabel>
