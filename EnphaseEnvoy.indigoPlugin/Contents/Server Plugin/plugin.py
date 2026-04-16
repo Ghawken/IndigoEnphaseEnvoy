@@ -70,6 +70,7 @@ POWER_FORCED_OFF_TRUE = 1   # production disabled
 # Based on pyenphase (Home Assistant) local API endpoints.
 ENVOY_TARIFF_PATH = "/admin/lib/tariff"
 ENVOY_GRID_RELAY_PATH = "/ivp/ensemble/relay"
+ENVOY_DPEL_PATH = "/ivp/ss/dpel"
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -680,6 +681,227 @@ class Plugin(indigo.PluginBase):
             if self.debugLevel >= 2:
                 self.logger.debug(f"Error polling power production status: {err}")
 
+    def _pollDpelStatus(self, dev):
+        """
+        Poll the DPEL (Dynamic Power Export Limiting) endpoint to keep
+        dpelEnabled and dpelLimitWatts states in sync.
+
+        Reads from GET /ivp/ss/dpel (installer token required).
+        """
+        if not self._is_installer_token(dev):
+            return
+
+        headers = self.create_headers(dev)
+        if not headers:
+            return
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            return
+
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_DPEL_PATH}"
+
+        try:
+            r = self._get(url, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                dpel_settings = data.get('dynamic_pel_settings', {})
+                enabled = dpel_settings.get('enable', False)
+                limit_w = dpel_settings.get('limit_value_W', 0)
+                export_limit = dpel_settings.get('export_limit', True)
+
+                mode_label = "Export" if export_limit else "Production"
+                if enabled:
+                    dev.updateStateOnServer('dpelEnabled',
+                                            value=f"Enabled ({mode_label} Limit)")
+                else:
+                    dev.updateStateOnServer('dpelEnabled', value="Disabled")
+                dev.updateStateOnServer('dpelLimitWatts', value=float(limit_w))
+
+                if self.debugLevel >= 2:
+                    self.logger.debug(
+                        f"DPEL status polled: enabled={enabled}, limit={limit_w}W, mode={mode_label}"
+                    )
+            elif r.status_code in (401, 403):
+                dev.updateStateOnServer('dpelEnabled', value="Status Unavailable")
+                if self.debugLevel >= 1:
+                    self.logger.debug(
+                        f"Cannot poll DPEL status for {dev.name}. HTTP {r.status_code}. "
+                        f"This endpoint requires an installer-level JWT token."
+                    )
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Could not poll DPEL status. HTTP {r.status_code}")
+        except Exception as err:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Error polling DPEL status: {err}")
+
+    def _enableDpel(self, dev, watts, slew_rate=50.0, export_limit=True):
+        """
+        Enable DPEL (Dynamic Power Export Limiting) via POST /ivp/ss/dpel.
+        Requires an installer-level JWT token.
+
+        Based on the vincentwolsink HA integration's enable_dpel method.
+        """
+        headers = self.create_headers(dev)
+        if not headers:
+            self.logger.error(
+                f"No auth token configured for device: {dev.name}. "
+                f"An installer-level JWT token is required for DPEL control."
+            )
+            return False
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            self.logger.error(f"No IP address configured for device: {dev.name}")
+            return False
+
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_DPEL_PATH}"
+        payload = json.dumps({
+            "dynamic_pel_settings": {
+                "enable": True,
+                "export_limit": export_limit,
+                "limit_value_W": float(watts),
+                "slew_rate": float(slew_rate),
+                "enable_dynamic_limiting": False,
+            },
+            "filename": "site_settings",
+            "version": "00.00.01",
+        })
+        headers['Content-Type'] = 'application/json'
+
+        try:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Enabling DPEL for: {dev.name} ({watts}W)")
+
+            host = urlsplit(url).netloc
+            session = self.session_cache[host]
+            r = session.post(url, data=payload, headers=headers,
+                             timeout=self.prefServerTimeout, allow_redirects=True)
+
+            if r.status_code in (200, 204):
+                mode_label = "Export" if export_limit else "Production"
+                indigo.server.log(
+                    f"DPEL enabled for {dev.name}: {watts}W {mode_label} limit"
+                )
+                dev.updateStateOnServer('dpelEnabled',
+                                        value=f"Enabled ({mode_label} Limit)")
+                dev.updateStateOnServer('dpelLimitWatts', value=float(watts))
+                return True
+            elif r.status_code in (401, 403):
+                self.logger.info(
+                    f"Authorization failed enabling DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}. "
+                    f"This endpoint requires an installer-level JWT token."
+                )
+                return False
+            else:
+                self.logger.error(
+                    f"Failed to enable DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}: {r.text}"
+                )
+                return False
+
+        except requests.exceptions.Timeout:
+            self.logger.error(f"Timeout enabling DPEL for: {dev.name}")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.error(f"Connection error enabling DPEL for: {dev.name}")
+            return False
+        except Exception as err:
+            self.logger.error(f"Error enabling DPEL for {dev.name}: {err}")
+            return False
+
+    def _disableDpel(self, dev):
+        """
+        Disable DPEL (Dynamic Power Export Limiting) via POST /ivp/ss/dpel.
+        Requires an installer-level JWT token.
+
+        Based on the vincentwolsink HA integration's disable_dpel method.
+        """
+        headers = self.create_headers(dev)
+        if not headers:
+            self.logger.error(
+                f"No auth token configured for device: {dev.name}. "
+                f"An installer-level JWT token is required for DPEL control."
+            )
+            return False
+
+        ip_address = dev.pluginProps.get('sourceXML', '')
+        if not ip_address:
+            self.logger.error(f"No IP address configured for device: {dev.name}")
+            return False
+
+        url = f"http{self.https_flag}://{ip_address}{ENVOY_DPEL_PATH}"
+        payload = json.dumps({
+            "dynamic_pel_settings": {"enable": False},
+            "filename": "site_settings",
+            "version": "00.00.01",
+        })
+        headers['Content-Type'] = 'application/json'
+
+        try:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Disabling DPEL for: {dev.name}")
+
+            host = urlsplit(url).netloc
+            session = self.session_cache[host]
+            r = session.post(url, data=payload, headers=headers,
+                             timeout=self.prefServerTimeout, allow_redirects=True)
+
+            if r.status_code in (200, 204):
+                indigo.server.log(f"DPEL disabled for {dev.name}")
+                dev.updateStateOnServer('dpelEnabled', value="Disabled")
+                return True
+            elif r.status_code in (401, 403):
+                self.logger.info(
+                    f"Authorization failed disabling DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}. "
+                    f"This endpoint requires an installer-level JWT token."
+                )
+                return False
+            else:
+                self.logger.error(
+                    f"Failed to disable DPEL for {dev.name}. "
+                    f"HTTP {r.status_code}: {r.text}"
+                )
+                return False
+
+        except requests.exceptions.Timeout:
+            self.logger.error(f"Timeout disabling DPEL for: {dev.name}")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.error(f"Connection error disabling DPEL for: {dev.name}")
+            return False
+        except Exception as err:
+            self.logger.error(f"Error disabling DPEL for {dev.name}: {err}")
+            return False
+
+    def enableDpelAction(self, pluginAction):
+        """Action callback: enable DPEL for the selected device."""
+        dev = indigo.devices[pluginAction.deviceId]
+        try:
+            watts = float(pluginAction.props.get('dpelWatts', 0))
+        except (ValueError, TypeError):
+            self.logger.error("Invalid DPEL watt value. Must be a number.")
+            return
+        try:
+            slew_rate = float(pluginAction.props.get('dpelSlewRate', 50))
+        except (ValueError, TypeError):
+            slew_rate = 50.0
+        export_limit = pluginAction.props.get('dpelExportLimit', True)
+        # ConfigUI checkbox returns string 'true'/'false'
+        if isinstance(export_limit, str):
+            export_limit = export_limit.lower() == 'true'
+        self.logger.info(f"Enabling DPEL for {dev.name}: {watts}W, slew={slew_rate}, export_limit={export_limit}")
+        self._enableDpel(dev, watts, slew_rate, export_limit)
+
+    def disableDpelAction(self, pluginAction):
+        """Action callback: disable DPEL for the selected device."""
+        dev = indigo.devices[pluginAction.deviceId]
+        self.logger.info(f"Disabling DPEL for {dev.name}")
+        self._disableDpel(dev)
+
     def _setPowerProduction(self, dev, enable):
         """
         Enable or disable solar power production via the Envoy local API.
@@ -874,6 +1096,8 @@ class Plugin(indigo.PluginBase):
                       "http{}://{}/ivp/meters/readings",
                       "http{}://{}/ivp/ensemble/inventory",
                       "http{}://{}/ivp/livedata/status",
+                      "http{}://{}/ivp/peb/devstatus",
+                      "http{}://{}/ivp/ss/dpel",
                       "http{}://{}/ivp/meters/reports/consumption",
                       "http{}://{}/info.xml"
                       ]
@@ -1563,6 +1787,67 @@ class Plugin(indigo.PluginBase):
             result = None
             return result
 
+    def getPdmEnergy(self, dev):
+        """
+        Fetch production energy data from /ivp/pdm/energy.
+        This installer-level endpoint returns more accurate production
+        values directly from the power/device manager.
+        Returns the JSON dict, or None on failure.
+        """
+        try:
+            headers = self.create_headers(dev)
+            if not headers:
+                return None
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/pdm/energy"
+            r = self._get(url, timeout=35, headers=headers)
+            if r.status_code == 200:
+                result = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"PDM Energy Result: {result}")
+                return result
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"PDM Energy returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching PDM energy: {error}", exc_info=True)
+            return None
+
+    def _applyPdmEnergy(self, dev):
+        """
+        If an installer-level token is available, fetch /ivp/pdm/energy
+        and override the production values with the more accurate PDM data.
+        Based on the vincentwolsink HA integration's path_by_token pattern
+        that prefers pdm_energy.production.pcu for installer tokens.
+        """
+        if not self._is_installer_token(dev):
+            return
+        pdm = self.getPdmEnergy(dev)
+        if pdm is None:
+            return
+        try:
+            pcu = pdm.get("production", {}).get("pcu", {})
+            if not pcu:
+                return
+            updates = []
+            if "wattsNow" in pcu:
+                updates.append({'key': 'productionWattsNow', 'value': int(pcu['wattsNow'])})
+            if "wattHoursToday" in pcu:
+                updates.append({'key': 'productionWattsToday', 'value': int(pcu['wattHoursToday'])})
+            if "wattHoursLifetime" in pcu:
+                updates.append({'key': 'productionwhLifetime', 'value': int(pcu['wattHoursLifetime'])})
+            if "wattHoursSevenDays" in pcu:
+                updates.append({'key': 'production7days', 'value': int(pcu['wattHoursSevenDays'])})
+            if updates:
+                dev.updateStatesOnServer(updates)
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"Production values overridden from PDM energy: {updates}")
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Error applying PDM energy data: {error}", exc_info=True)
+
+
     def checkThePanels_New(self,dev, thePanels=None):
         if self.debugLevel >= 2:
             self.logger.debug(u'check thepanels called')
@@ -1599,8 +1884,9 @@ class Plugin(indigo.PluginBase):
                                 dev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
                                 dev.setErrorStateOnServer(None)
 
-                                # Extra devstatus fields (present when data from /ivp/peb/devstatus)
-                                if panel.get('_source') == 'devstatus':
+
+                                # Extra extended fields (present when data from device_data or devstatus)
+                                if panel.get('_source') in ('device_data', 'devstatus'):
                                     if panel.get('ac_power_watts') is not None:
                                         ac_w = panel['ac_power_watts']
                                         dev.updateStateOnServer('acPower', value=ac_w, uiValue=f"{ac_w} W")
@@ -1619,6 +1905,20 @@ class Plugin(indigo.PluginBase):
                                     if panel.get('gone') is not None:
                                         # gone=True means inverter is NOT communicating
                                         dev.updateStateOnServer('communicating', value=not panel['gone'])
+                                    # device_data-only extended fields
+                                    if panel.get('ac_current') is not None:
+                                        ac_a = round(panel['ac_current'], 3)
+                                        dev.updateStateOnServer('acCurrent', value=ac_a, uiValue=f"{ac_a} A")
+                                    if panel.get('ac_frequency') is not None:
+                                        ac_hz = round(panel['ac_frequency'], 3)
+                                        dev.updateStateOnServer('acFrequency', value=ac_hz, uiValue=f"{ac_hz} Hz")
+                                    if panel.get('watt_hours_today') is not None:
+                                        dev.updateStateOnServer('wattHoursToday', value=int(panel['watt_hours_today']))
+                                    if panel.get('watt_hours_week') is not None:
+                                        dev.updateStateOnServer('wattHoursWeek', value=int(panel['watt_hours_week']))
+                                    if panel.get('lifetime_power') is not None:
+                                        dev.updateStateOnServer('lifetimeEnergy', value=int(panel['lifetime_power']))
+
 
             except Exception as error:
                 self.errorLog('error within checkthePanels:'+str(error))
@@ -1709,23 +2009,25 @@ class Plugin(indigo.PluginBase):
     def getthePanels(self, dev):
         """Fetch per-inverter panel data.
 
-        When an installer-level token is available the preferred
-        ``/ivp/peb/devstatus`` endpoint is tried first — it returns
-        more accurate, more up-to-date data including AC power,
-        DC voltage/current, temperature, etc.
+        Tries endpoints in order of richness:
 
-        If that fails or the token is owner-level, fall back to
-        ``/api/v1/production/inverters``.
+        1. ``/ivp/pdm/device_data`` — available with any token.
+           Returns watts, watts_max, wattHours today/week,
+           AC voltage/current/frequency, DC voltage/current,
+           temperature, lifetime energy, RSSI, etc.
+
+        2. ``/ivp/peb/devstatus`` — installer token only.
+           Returns AC power, DC voltage/current, temperature.
+
+        3. ``/api/v1/production/inverters`` — legacy fallback.
 
         Returns a list of dicts in a **unified format** that always
         contains the standard keys used by callers:
 
             serialNumber, lastReportWatts, lastReportDate, maxReportWatts
 
-        When the data comes from devstatus additional keys are present:
-
-            ac_power (mW), ac_voltage (V), dc_voltage (V),
-            dc_current (A), temperature, gone, _source='devstatus'
+        When data comes from device_data or devstatus, additional keys
+        are present for extended panel states.
         """
         if self.debugLevel >= 2:
             self.logger.debug(u"getthePanels Enphase Envoy method called.")
@@ -1733,7 +2035,16 @@ class Plugin(indigo.PluginBase):
         if not dev.states['deviceIsOnline']:
             return None
 
-        # ── Try devstatus first (installer token) ───────────────
+        # ── Try device_data first (any token, richest data) ─────
+        device_data = self.getDeviceData(dev)
+        if device_data:
+            unified = self._devicedata_to_unified(device_data)
+            if unified:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"getthePanels: using device_data endpoint ({len(unified)} inverters)")
+                return unified
+
+        # ── Try devstatus (installer token) ─────────────────────
         if self._is_installer_token(dev):
             devstatus = self.getDevStatus(dev)
             if devstatus:
@@ -1742,13 +2053,46 @@ class Plugin(indigo.PluginBase):
                     if self.debugLevel >= 2:
                         self.logger.debug(f"getthePanels: using devstatus endpoint ({len(unified)} inverters)")
                     return unified
-                # devstatus parsed but produced no usable records – fall through
-            # devstatus unavailable/failed – fall through to legacy
 
         # ── Legacy endpoint ─────────────────────────────────────
         return self._getthePanels_legacy(dev)
 
-        # ---------------------------------------------------------
+
+    def _devicedata_to_unified(self, devicedata_list):
+        """Convert parseDeviceData() output into the unified panel format.
+
+        Adds the standard keys (serialNumber, lastReportWatts,
+        lastReportDate, maxReportWatts) expected by callers,
+        plus extended keys for the richer device_data fields.
+        """
+        result = []
+        for dd in devicedata_list:
+            sn = dd.get("sn")
+            if sn is None:
+                continue
+            panel = {
+                # standard keys expected everywhere
+                "serialNumber": sn,
+                "lastReportWatts": dd.get("watts", 0),
+                "lastReportDate": dd.get("last_reading", 0),
+                "maxReportWatts": dd.get("watts_max", 0),
+                # extended device_data fields
+                "ac_power_watts": dd.get("watts", 0),
+                "ac_voltage": round(dd["ac_voltage"], 2) if dd.get("ac_voltage") is not None else None,
+                "ac_current": round(dd["ac_current"], 3) if dd.get("ac_current") is not None else None,
+                "ac_frequency": round(dd["ac_frequency"], 3) if dd.get("ac_frequency") is not None else None,
+                "dc_voltage": round(dd["dc_voltage"], 2) if dd.get("dc_voltage") is not None else None,
+                "dc_current": round(dd["dc_current"], 3) if dd.get("dc_current") is not None else None,
+                "temperature": dd.get("temperature"),
+                "watt_hours_today": dd.get("watt_hours_today"),
+                "watt_hours_week": dd.get("watt_hours_week"),
+                "lifetime_power": dd.get("lifetime_power"),
+                "gone": dd.get("gone"),
+                "_source": "device_data",
+            }
+            result.append(panel)
+        return result if result else None
+
 
     def _devstatus_to_unified(self, devstatus_list):
         """Convert parseDevStatus() output into the unified panel format.
@@ -1848,6 +2192,113 @@ class Plugin(indigo.PluginBase):
                 paneldevice.setErrorStateOnServer(u'Offline')
             self.WaitInterval = 60
             return None
+
+    def getDeviceData(self, dev):
+        """
+        Fetch per-inverter data from /ivp/pdm/device_data.
+        This endpoint is available with any token (not installer-only)
+        and returns the richest per-inverter data: watts, watts_max,
+        wattHours today/yesterday/week, AC/DC voltage/current,
+        temperature, lifetime energy, RSSI, and more.
+        Returns the parsed list of device dicts, or None on failure.
+        """
+        try:
+            headers = self.create_headers(dev)
+            if not headers:
+                return None
+            url = f"http{self.https_flag}://{dev.pluginProps['sourceXML']}/ivp/pdm/device_data"
+            r = self._get(url, timeout=35, headers=headers)
+            if r.status_code == 200:
+                raw = r.json()
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"DeviceData raw result: {raw}")
+                return self.parseDeviceData(raw)
+            else:
+                if self.debugLevel >= 2:
+                    self.logger.debug(f"DeviceData returned status {r.status_code}")
+                return None
+        except Exception as error:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Exception fetching device_data: {error}", exc_info=True)
+            return None
+
+    def parseDeviceData(self, data):
+        """
+        Parse the /ivp/pdm/device_data response into a list of device dicts.
+        Based on the vincentwolsink HA integration's parse_devicedata function.
+
+        The response is a dict keyed by device EID, each value containing:
+          devName, sn, active, modGone, channels[0].watts.now/max,
+          channels[0].wattHours.today/yesterday/week,
+          channels[0].lastReading.{acVoltageINmV, acFrequencyINmHz, ...}
+          channels[0].lifetime.joulesProduced
+
+        Returns a list of dicts with keys:
+          sn, watts, watts_max, watt_hours_today, watt_hours_yesterday,
+          watt_hours_week, ac_voltage, ac_frequency, ac_current,
+          dc_voltage, dc_current, temperature, lifetime_power,
+          gone, last_reading
+        """
+        result = []
+        for device in data.values():
+            if not isinstance(device, dict) or not device.get("active", False):
+                continue
+            if device.get("devName") != "pcu":
+                continue
+
+            dd = {}
+            dd["sn"] = device.get("sn")
+            dd["gone"] = device.get("modGone", False)
+
+            channels = device.get("channels")
+            if not channels or not isinstance(channels, list):
+                result.append(dd)
+                continue
+
+            ch = channels[0]
+
+            # watts.now and watts.max
+            watts_info = ch.get("watts", {})
+            dd["watts"] = watts_info.get("now", 0)
+            dd["watts_max"] = watts_info.get("max", 0)
+
+            # wattHours
+            wh = ch.get("wattHours", {})
+            dd["watt_hours_today"] = wh.get("today", 0)
+            dd["watt_hours_yesterday"] = wh.get("yesterday", 0)
+            dd["watt_hours_week"] = wh.get("week", 0)
+
+            # lastReading - with mV/mA/mHz conversion
+            lr = ch.get("lastReading", {})
+            dd["last_reading"] = lr.get("endDate", 0)
+
+            ac_v = lr.get("acVoltageINmV")
+            dd["ac_voltage"] = int(ac_v) / 1000 if ac_v is not None else None
+
+            ac_f = lr.get("acFrequencyINmHz")
+            dd["ac_frequency"] = int(ac_f) / 1000 if ac_f is not None else None
+
+            ac_i = lr.get("acCurrentInmA")
+            dd["ac_current"] = int(ac_i) / 1000 if ac_i is not None else None
+
+            dc_v = lr.get("dcVoltageINmV")
+            dd["dc_voltage"] = int(dc_v) / 1000 if dc_v is not None else None
+
+            dc_i = lr.get("dcCurrentINmA")
+            dd["dc_current"] = int(dc_i) / 1000 if dc_i is not None else None
+
+            dd["temperature"] = lr.get("channelTemp")
+
+            # lifetime energy: joules -> Wh
+            lifetime = ch.get("lifetime", {})
+            joules = lifetime.get("joulesProduced")
+            dd["lifetime_power"] = round(int(joules) * 0.000277778) if joules is not None else None
+
+            result.append(dd)
+            if self.debugLevel >= 2:
+                self.logger.debug(f"Parsed device_data inverter: {dd}")
+
+        return result if result else None
 
     def getDevStatus(self, dev):
         """
@@ -2624,6 +3075,7 @@ class Plugin(indigo.PluginBase):
                         self.logger.debug(u"Online: Refreshing device: {0}".format(dev.name))
                     data = self.gettheDataChoice(dev)
                     self.parseStateValues(dev, data)
+                    #self._applyPdmEnergy(dev)   Meters seems better result.  Not using PDM.
                     self._pollPowerProductionStatus(dev)
                     # Fetch and parse per-phase meter readings for metered systems
                     if dev.states.get('typeEnvoy') == "Metered":

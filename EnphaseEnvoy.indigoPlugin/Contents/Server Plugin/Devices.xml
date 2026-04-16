@@ -147,6 +147,19 @@
         <TriggerLabel>Number of MicroInverters</TriggerLabel>
         <ControlPageLabel>Number of Microinverters</ControlPageLabel>
       </State>
+
+      <!-- DPEL (Dynamic Power Export Limiting) -->
+      <State id="dpelEnabled">
+        <ValueType>String</ValueType>
+        <TriggerLabel>DPEL Enabled</TriggerLabel>
+        <ControlPageLabel>DPEL Enabled</ControlPageLabel>
+      </State>
+      <State id="dpelLimitWatts">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>DPEL Export Limit (W)</TriggerLabel>
+        <ControlPageLabel>DPEL Export Limit (W)</ControlPageLabel>
+      </State>
+
      <State id="productionWattsToday">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power Production Today (watts)</TriggerLabel>
@@ -596,7 +609,31 @@
         <TriggerLabel>Date/Time Last Communication from Panel</TriggerLabel>
         <ControlPageLabel>Date/time Last Communication from Panel</ControlPageLabel>
       </State>
-
+     <State id="acFrequency">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>AC Frequency (Hz)</TriggerLabel>
+        <ControlPageLabel>AC Frequency (Hz)</ControlPageLabel>
+      </State>
+      <State id="acCurrent">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>AC Current (A)</TriggerLabel>
+        <ControlPageLabel>AC Current (A)</ControlPageLabel>
+      </State>
+      <State id="wattHoursToday">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Energy Today (Wh)</TriggerLabel>
+        <ControlPageLabel>Energy Today (Wh)</ControlPageLabel>
+      </State>
+      <State id="wattHoursWeek">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Energy This Week (Wh)</TriggerLabel>
+        <ControlPageLabel>Energy This Week (Wh)</ControlPageLabel>
+      </State>
+      <State id="lifetimeEnergy">
+        <ValueType>Number</ValueType>
+        <TriggerLabel>Lifetime Energy (Wh)</TriggerLabel>
+        <ControlPageLabel>Lifetime Energy (Wh)</ControlPageLabel>
+      </State>
       <State id="temperature">
         <ValueType>Number</ValueType>
         <TriggerLabel>Inverter Temperature (°C)</TriggerLabel>
