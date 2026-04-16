@@ -2178,7 +2178,7 @@ class Plugin(indigo.PluginBase):
 
         # ── Fallback: if the legacy endpoint failed entirely, try ──
         # ── the richer endpoints as sole data sources.             ──
-        self.logger.debug("getthePanels: /api/v1/production/inverters unavailable, falling back to device_data/devstatus")
+        self.logger.debug("getthePanels: no data returned from /api/v1/production/inverters, falling back to device_data/devstatus")
 
         device_data = self.getDeviceData(dev)
         if device_data:
