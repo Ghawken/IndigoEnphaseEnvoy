@@ -706,14 +706,18 @@ class Plugin(indigo.PluginBase):
             r = self._get(url, headers=headers)
             if r.status_code == 200:
                 data = r.json()
-                # The response may be a dict with a seconds/interval key,
-                # or it may be a plain integer.
+                # Response is {"newDeviceScan": {"polling-period-secs": 900, ...}}
+                interval = 0
                 if isinstance(data, dict):
-                    interval = data.get('period', data.get('interval', data.get('newscan', 0)))
+                    scan_data = data.get('newDeviceScan', data)
+                    if isinstance(scan_data, dict):
+                        interval = scan_data.get('polling-period-secs',
+                                       scan_data.get('period',
+                                       scan_data.get('interval', 0)))
+                    else:
+                        interval = 0
                 elif isinstance(data, (int, float)):
                     interval = int(data)
-                else:
-                    interval = 0
                 dev.updateStateOnServer('envoyPollingInterval', value=int(interval))
                 self.logger.info(f"[{dev.name}] Envoy polling interval: {interval}s")
             elif r.status_code in (401, 403):
