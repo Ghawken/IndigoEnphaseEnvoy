@@ -63,14 +63,22 @@
     <Name>Enable DPEL (Export Limiting)</Name>
     <CallbackMethod>enableDpelAction</CallbackMethod>
     <ConfigUI>
+      <Field id="dpelInfoLabel" type="label" fontSize="small">
+        <Label>DPEL (Dynamic Power Export Limiting) controls how much power your solar system exports to the grid. This requires an installer-level token. The Envoy enforces the limit by curtailing inverter output in real time.</Label>
+      </Field>
+      <Field id="dpelSep1" type="separator"/>
       <Field id="dpelWatts" type="textfield" defaultValue="0">
         <Label>Export Limit (Watts):</Label>
+        <Description>Maximum watts allowed to be exported (or produced). Set to 0 for zero export.</Description>
       </Field>
       <Field id="dpelSlewRate" type="textfield" defaultValue="50">
         <Label>Slew Rate:</Label>
+        <Description>How quickly (watts/sec) the Envoy ramps inverter output up or down to meet the limit. Lower values produce smoother, slower adjustments.</Description>
       </Field>
+      <Field id="dpelSep2" type="separator"/>
       <Field id="dpelExportLimit" type="checkbox" defaultValue="true">
-        <Label>Export Limit Mode (unchecked = Production Limit):</Label>
+        <Label>Export Limit Mode:</Label>
+        <Description>Checked = limit grid export only (excess powers your home first). Unchecked = limit total production.</Description>
       </Field>
     </ConfigUI>
 </Action>
@@ -78,6 +86,11 @@
 <Action id="disableDpel" deviceFilter="self.EnphaseEnvoyDevice">
     <Name>Disable DPEL (Export Limiting)</Name>
     <CallbackMethod>disableDpelAction</CallbackMethod>
+    <ConfigUI>
+      <Field id="dpelDisableLabel" type="label" fontSize="small">
+        <Label>This will disable DPEL (Dynamic Power Export Limiting) and allow unrestricted power export to the grid. Requires an installer-level token.</Label>
+      </Field>
+    </ConfigUI>
 </Action>
 </Actions>
 
