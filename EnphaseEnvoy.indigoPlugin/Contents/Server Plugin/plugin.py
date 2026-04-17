@@ -200,7 +200,7 @@ class Plugin(indigo.PluginBase):
         self.serial_number_last_six = {}  # dev.id -> last 6
         # Cached extended panel data (device_data / devstatus), keyed by dev.id.
         # Each value is a dict {serialNumber → unified_panel_dict}.
-        # Refreshed every ~15 min by _refreshPanelExtendedData(); merged into
+        # Refreshed every ~5 min by _refreshPanelExtendedData(); merged into
         # the real-time watts on every 60 s panel_health cycle.
         self._cached_panel_extended = {}  # dev.id -> {sn: panel_dict, ...}
 
