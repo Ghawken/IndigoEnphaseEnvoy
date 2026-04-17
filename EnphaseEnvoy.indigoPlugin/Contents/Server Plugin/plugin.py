@@ -2111,16 +2111,19 @@ class Plugin(indigo.PluginBase):
             return result
 
     def getthePanels(self, dev):
-        """Fetch per-inverter **real-time watts** and merge cached extended data.
+        """Fetch per-inverter data and merge cached extended data.
 
         Called every ~60 s by the ``panel_health`` timer.
 
-        * Always fetches ``/api/v1/production/inverters`` for near-
-          real-time watt/timestamp readings (< 1 min delay).
+        * Always fetches ``/api/v1/production/inverters`` for legacy
+          watt/timestamp readings.
         * Merges in **cached** extended data (temperature, voltage,
           current, wattHours, lifetime energy …) that was last
           refreshed by ``_refreshPanelExtendedData()`` on the slower
           ``panel_extended`` timer (~15 min).
+        * For each inverter the timestamps from both sources are
+          compared; whichever is **more recent** supplies both the
+          watts and the timestamp so the values stay coherent.
         * Never calls ``/ivp/pdm/device_data`` or ``/ivp/peb/devstatus``
           itself — those are fetched only on the 15-min cadence.
 
@@ -2239,41 +2242,63 @@ class Plugin(indigo.PluginBase):
         *cached_ext* is the cache dict {serialNumber: unified_dict, '_ext_source': …}.
         *ext_source* is 'device_data' or 'devstatus' — stored as ``_source``.
 
-        Core real-time keys (serialNumber, lastReportWatts, maxReportWatts)
-        are never overwritten by extended data.
+        For each panel the ``lastReportDate`` timestamps from legacy and
+        the extended source are compared.  Whichever source has the
+        **most recent** timestamp wins for both ``lastReportDate`` *and*
+        ``lastReportWatts`` — keeping the watts and timestamp coherent
+        (both always refer to the same reading).
 
-        ``lastReportDate`` is special-cased: the **most recent** timestamp
-        from either source is kept so that stale-panel detection always
-        uses the freshest available reading.
+        ``serialNumber`` is never overwritten.  ``maxReportWatts`` is
+        only replaced when the extended source supplies a non-zero value
+        (devstatus does not carry a max field and sets it to 0).
+
+        All other extended keys (voltage, temperature, …) are always
+        merged in regardless of which source is newer.
         """
-        CORE_KEYS = {'serialNumber', 'lastReportWatts', 'maxReportWatts'}
         for sn, ext in cached_ext.items():
             if sn.startswith('_') or not isinstance(ext, dict):
                 continue  # skip meta keys like '_ext_source'
             if sn in rt_by_sn:
                 panel = rt_by_sn[sn]
+
+                # ── Determine which source has the fresher reading ──
+                try:
+                    rt_ts = int(panel.get('lastReportDate', 0))
+                except (ValueError, TypeError):
+                    rt_ts = 0
+                try:
+                    ext_ts = int(ext.get('lastReportDate', 0)) if ext.get('lastReportDate') else 0
+                except (ValueError, TypeError):
+                    ext_ts = 0
+
+                ext_is_newer = ext_ts > rt_ts
+
+                if ext_is_newer:
+                    # Extended data is more recent — use its watts & timestamp
+                    panel['lastReportDate'] = ext_ts
+                    if 'lastReportWatts' in ext:
+                        panel['lastReportWatts'] = ext['lastReportWatts']
+                    if self.debugLevel >= 2:
+                        self.logger.debug(
+                            f"_enrich_panels: {sn} using newer reading "
+                            f"from {ext_source} (ts={ext_ts}, watts={ext.get('lastReportWatts')}) "
+                            f"over legacy (ts={rt_ts}, watts={panel.get('lastReportWatts')})"
+                        )
+
+                # ── maxReportWatts: only override if ext has a real value ──
+                ext_max = ext.get('maxReportWatts', 0)
+                try:
+                    ext_max = int(ext_max)
+                except (ValueError, TypeError):
+                    ext_max = 0
+                if ext_max > 0:
+                    panel['maxReportWatts'] = ext_max
+
+                # ── Merge all other extended keys (voltage, temp, …) ──
+                SKIP_KEYS = {'serialNumber', 'lastReportWatts', 'lastReportDate', 'maxReportWatts'}
                 for key, value in ext.items():
-                    if key in CORE_KEYS:
-                        continue
-                    if key == 'lastReportDate':
-                        # Keep the most recent timestamp from either source
-                        try:
-                            rt_ts = int(panel.get('lastReportDate', 0))
-                        except (ValueError, TypeError):
-                            rt_ts = 0
-                        try:
-                            ext_ts = int(value) if value else 0
-                        except (ValueError, TypeError):
-                            ext_ts = 0
-                        if ext_ts > rt_ts:
-                            if self.debugLevel >= 2:
-                                self.logger.debug(
-                                    f"_enrich_panels: {sn} using newer lastReportDate "
-                                    f"from {ext_source} ({ext_ts}) over legacy ({rt_ts})"
-                                )
-                            panel['lastReportDate'] = ext_ts
-                        continue
-                    panel[key] = value
+                    if key not in SKIP_KEYS:
+                        panel[key] = value
                 panel['_source'] = ext_source
 
 
