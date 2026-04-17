@@ -2257,8 +2257,14 @@ class Plugin(indigo.PluginBase):
                         continue
                     if key == 'lastReportDate':
                         # Keep the most recent timestamp from either source
-                        rt_ts = int(panel.get('lastReportDate', 0))
-                        ext_ts = int(value) if value else 0
+                        try:
+                            rt_ts = int(panel.get('lastReportDate', 0))
+                        except (ValueError, TypeError):
+                            rt_ts = 0
+                        try:
+                            ext_ts = int(value) if value else 0
+                        except (ValueError, TypeError):
+                            ext_ts = 0
                         if ext_ts > rt_ts:
                             if self.debugLevel >= 2:
                                 self.logger.debug(
