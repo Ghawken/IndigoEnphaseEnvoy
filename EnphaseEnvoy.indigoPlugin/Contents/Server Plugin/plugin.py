@@ -2233,27 +2233,41 @@ class Plugin(indigo.PluginBase):
                 )
 
     def _enrich_panels(self, rt_by_sn, cached_ext, ext_source):
-        """Merge cached extended fields into real-time panel dicts
-        **without** overwriting the real-time watts or timestamp.
+        """Merge cached extended fields into real-time panel dicts.
 
         *rt_by_sn* is a {serialNumber: dict} lookup of real-time data.
         *cached_ext* is the cache dict {serialNumber: unified_dict, '_ext_source': …}.
         *ext_source* is 'device_data' or 'devstatus' — stored as ``_source``.
 
-        Only keys that are **not** part of the core real-time set
-        (serialNumber, lastReportWatts, lastReportDate, maxReportWatts)
-        are copied from the extended data.  This preserves the near-
-        real-time readings while adding temperature, voltage, etc.
+        Core real-time keys (serialNumber, lastReportWatts, maxReportWatts)
+        are never overwritten by extended data.
+
+        ``lastReportDate`` is special-cased: the **most recent** timestamp
+        from either source is kept so that stale-panel detection always
+        uses the freshest available reading.
         """
-        CORE_KEYS = {'serialNumber', 'lastReportWatts', 'lastReportDate', 'maxReportWatts'}
+        CORE_KEYS = {'serialNumber', 'lastReportWatts', 'maxReportWatts'}
         for sn, ext in cached_ext.items():
             if sn.startswith('_') or not isinstance(ext, dict):
                 continue  # skip meta keys like '_ext_source'
             if sn in rt_by_sn:
                 panel = rt_by_sn[sn]
                 for key, value in ext.items():
-                    if key not in CORE_KEYS:
-                        panel[key] = value
+                    if key in CORE_KEYS:
+                        continue
+                    if key == 'lastReportDate':
+                        # Keep the most recent timestamp from either source
+                        rt_ts = int(panel.get('lastReportDate', 0))
+                        ext_ts = int(value) if value else 0
+                        if ext_ts > rt_ts:
+                            if self.debugLevel >= 2:
+                                self.logger.debug(
+                                    f"_enrich_panels: {sn} using newer lastReportDate "
+                                    f"from {ext_source} ({ext_ts}) over legacy ({rt_ts})"
+                                )
+                            panel['lastReportDate'] = ext_ts
+                        continue
+                    panel[key] = value
                 panel['_source'] = ext_source
 
 
