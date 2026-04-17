@@ -198,6 +198,11 @@ class Plugin(indigo.PluginBase):
         self.generated_token_expiry = datetime.datetime.now()
         self.serial_number_full = {}  # dev.id -> full serial
         self.serial_number_last_six = {}  # dev.id -> last 6
+        # Cached extended panel data (device_data / devstatus), keyed by dev.id.
+        # Each value is a dict {serialNumber → unified_panel_dict}.
+        # Refreshed every ~15 min by _refreshPanelExtendedData(); merged into
+        # the real-time watts on every 60 s panel_health cycle.
+        self._cached_panel_extended = {}  # dev.id -> {sn: panel_dict, ...}
 
         self.EnvoyStype = ""
         self.logger.info(u"")
@@ -1200,7 +1205,8 @@ class Plugin(indigo.PluginBase):
             "datetime": 22 * 60,  # 22 min
             "envoy_type": 6 * 60 * 60,  # 6 h
             "panel_inventory": 5 * 60,  # 5 min
-            "panel_health": 60,  # 3 min 20 s
+            "panel_health": 60,  # 1 min – real-time watts
+            "panel_extended": 15 * 60,  # 15 min – extended data (voltage, temp, etc.)
             "envoy_refresh": 60,  # 1 min
         }
 
@@ -1272,6 +1278,7 @@ class Plugin(indigo.PluginBase):
                     _run_check(ts, "datetime", CHECKS["datetime"], self.checkDayTime, dev)
                     _run_check(ts, "envoy_type", CHECKS["envoy_type"], self.checkEnvoyType, dev)
                     _run_check(ts, "panel_inventory", CHECKS["panel_inventory"], self.checkPanelInventory, dev)
+                    _run_check(ts, "panel_extended", CHECKS["panel_extended"], self._refreshPanelExtendedData, dev)
                     _run_check(ts, "panel_health", CHECKS["panel_health"], self.checkThePanels_New, dev)
                     _run_check(ts, "envoy_refresh", CHECKS["envoy_refresh"], self.refreshDataForDev, dev)
 
@@ -1305,6 +1312,7 @@ class Plugin(indigo.PluginBase):
                     for ts in timers.values():
                         ts["panel_inventory"] = now
                         ts["panel_health"] = now
+                        ts["panel_extended"] = now
                         ts["envoy_refresh"] = now
                     # Leave "envoy_type" and "datetime" untouched → cadence preserved
 
@@ -2099,33 +2107,24 @@ class Plugin(indigo.PluginBase):
             return result
 
     def getthePanels(self, dev):
-        """Fetch per-inverter panel data.
+        """Fetch per-inverter **real-time watts** and merge cached extended data.
 
-        Uses ``/api/v1/production/inverters`` as the **primary** source
-        because it provides **near-real-time** watt/timestamp readings
-        (typically < 1 minute delay).  The richer endpoints
-        (``/ivp/pdm/device_data`` and ``/ivp/peb/devstatus``) are
-        known to be delayed by ~15-30 minutes on many firmware
-        versions, so they are used only to **enrich** the real-time
-        data with extended fields (AC/DC voltage, current, temperature,
-        wattHours, lifetime energy, etc.).
+        Called every ~60 s by the ``panel_health`` timer.
 
-        Endpoint strategy:
+        * Always fetches ``/api/v1/production/inverters`` for near-
+          real-time watt/timestamp readings (< 1 min delay).
+        * Merges in **cached** extended data (temperature, voltage,
+          current, wattHours, lifetime energy …) that was last
+          refreshed by ``_refreshPanelExtendedData()`` on the slower
+          ``panel_extended`` timer (~15 min).
+        * Never calls ``/ivp/pdm/device_data`` or ``/ivp/peb/devstatus``
+          itself — those are fetched only on the 15-min cadence.
 
-        1. ``/api/v1/production/inverters`` — real-time watts &
-           timestamps (primary source).
-        2. ``/ivp/pdm/device_data`` (any token) or
-           ``/ivp/peb/devstatus`` (installer token) — merged in for
-           extended fields only.  Real-time watts/timestamps from
-           step 1 are **never overwritten** by these slower endpoints.
-
-        Returns a list of dicts in a **unified format** that always
-        contains the standard keys used by callers:
+        Returns a list of dicts in the unified format:
 
             serialNumber, lastReportWatts, lastReportDate, maxReportWatts
 
-        When enrichment data is available, additional keys are present
-        for extended panel states.
+        with extended keys when cached enrichment data is available.
         """
         if self.debugLevel >= 2:
             self.logger.debug(u"getthePanels Enphase Envoy method called.")
@@ -2133,7 +2132,7 @@ class Plugin(indigo.PluginBase):
         if not dev.states['deviceIsOnline']:
             return None
 
-        # ── 1. Real-time data from /api/v1/production/inverters ──
+        # ── 1. Real-time watts from /api/v1/production/inverters ──
         realtime = self._getthePanels_legacy(dev)
         source = "inverters"
 
@@ -2141,27 +2140,11 @@ class Plugin(indigo.PluginBase):
             # Build a serial-number → dict lookup for the real-time data
             rt_by_sn = {str(p['serialNumber']): p for p in realtime}
 
-            # ── 2. Enrich with extended data ─────────────────────
-            enriched = False
-
-            # Try device_data first (any token, richest extended data)
-            device_data = self.getDeviceData(dev)
-            if device_data:
-                unified_ext = self._devicedata_to_unified(device_data)
-                if unified_ext:
-                    self._enrich_panels(rt_by_sn, unified_ext, "device_data")
-                    enriched = True
-                    source = "inverters+device_data"
-
-            # If device_data was not available, try devstatus (installer token)
-            if not enriched and self._is_installer_token(dev):
-                devstatus = self.getDevStatus(dev)
-                if devstatus:
-                    unified_ext = self._devstatus_to_unified(devstatus)
-                    if unified_ext:
-                        self._enrich_panels(rt_by_sn, unified_ext, "devstatus")
-                        enriched = True
-                        source = "inverters+devstatus"
+            # ── 2. Merge cached extended data (if any) ───────────
+            cached = self._cached_panel_extended.get(dev.id)
+            if cached:
+                self._enrich_panels(rt_by_sn, cached, cached.get('_ext_source', 'cached'))
+                source = f"inverters+{cached.get('_ext_source', 'cached')}"
 
             # Update the data-source state on the Envoy device
             try:
@@ -2176,45 +2159,81 @@ class Plugin(indigo.PluginBase):
                 )
             return realtime
 
-        # ── Fallback: if the legacy endpoint failed entirely, try ──
-        # ── the richer endpoints as sole data sources.             ──
-        self.logger.debug("getthePanels: no data returned from /api/v1/production/inverters, falling back to device_data/devstatus")
-
-        device_data = self.getDeviceData(dev)
-        if device_data:
-            unified = self._devicedata_to_unified(device_data)
-            if unified:
-                source = "device_data"
+        # ── Fallback: if the legacy endpoint failed, use cached extended ──
+        # ── data alone (it at least has watts, albeit delayed).           ──
+        self.logger.debug("getthePanels: no data from /api/v1/production/inverters, using cached extended data if available")
+        cached = self._cached_panel_extended.get(dev.id)
+        if cached:
+            # Return the cached unified dicts as a list
+            panels = [v for k, v in cached.items() if k != '_ext_source' and isinstance(v, dict)]
+            if panels:
+                source = cached.get('_ext_source', 'cached')
                 try:
                     dev.updateStateOnServer('panelDataSource', value=source)
                 except Exception:
                     pass
-                if self.debugLevel >= 2:
-                    self.logger.debug(f"getthePanels: using device_data endpoint ({len(unified)} inverters)")
-                return unified
-
-        if self._is_installer_token(dev):
-            devstatus = self.getDevStatus(dev)
-            if devstatus:
-                unified = self._devstatus_to_unified(devstatus)
-                if unified:
-                    source = "devstatus"
-                    try:
-                        dev.updateStateOnServer('panelDataSource', value=source)
-                    except Exception:
-                        pass
-                    if self.debugLevel >= 2:
-                        self.logger.debug(f"getthePanels: using devstatus endpoint ({len(unified)} inverters)")
-                    return unified
+                return panels
 
         return None
 
-    def _enrich_panels(self, rt_by_sn, extended_list, ext_source):
-        """Merge extended fields into real-time panel dicts **without**
-        overwriting the real-time watts or timestamp.
+    def _refreshPanelExtendedData(self, dev):
+        """Fetch extended panel data and cache it for the fast 60 s cycle.
+
+        Called every ~15 min by the ``panel_extended`` timer.
+
+        Tries ``/ivp/pdm/device_data`` first (available with any token,
+        richest data).  Falls back to ``/ivp/peb/devstatus`` (installer
+        token only).
+
+        The result is stored in ``self._cached_panel_extended[dev.id]``
+        as a ``{serialNumber: unified_dict, …, '_ext_source': …}`` dict
+        so that ``getthePanels()`` can merge it into fresh real-time
+        watts without making additional HTTP calls.
+        """
+        if not dev.states.get('deviceIsOnline', False):
+            return
+        if not dev.pluginProps.get('activatePanels', False):
+            return
+
+        ext_source = None
+        unified_ext = None
+
+        # Try device_data first (any token, richest extended data)
+        device_data = self.getDeviceData(dev)
+        if device_data:
+            unified_ext = self._devicedata_to_unified(device_data)
+            if unified_ext:
+                ext_source = "device_data"
+
+        # If device_data was not available, try devstatus (installer token)
+        if unified_ext is None and self._is_installer_token(dev):
+            devstatus = self.getDevStatus(dev)
+            if devstatus:
+                unified_ext = self._devstatus_to_unified(devstatus)
+                if unified_ext:
+                    ext_source = "devstatus"
+
+        if unified_ext:
+            # Store as a {serialNumber → dict} lookup, plus a meta key
+            cache = {str(p['serialNumber']): p for p in unified_ext}
+            cache['_ext_source'] = ext_source
+            self._cached_panel_extended[dev.id] = cache
+            self.logger.debug(
+                f"Cached extended panel data for {dev.name}: "
+                f"{len(unified_ext)} inverters from {ext_source}"
+            )
+        else:
+            if self.debugLevel >= 2:
+                self.logger.debug(
+                    f"No extended panel data available for {dev.name}"
+                )
+
+    def _enrich_panels(self, rt_by_sn, cached_ext, ext_source):
+        """Merge cached extended fields into real-time panel dicts
+        **without** overwriting the real-time watts or timestamp.
 
         *rt_by_sn* is a {serialNumber: dict} lookup of real-time data.
-        *extended_list* is the unified list from device_data or devstatus.
+        *cached_ext* is the cache dict {serialNumber: unified_dict, '_ext_source': …}.
         *ext_source* is 'device_data' or 'devstatus' — stored as ``_source``.
 
         Only keys that are **not** part of the core real-time set
@@ -2223,8 +2242,9 @@ class Plugin(indigo.PluginBase):
         real-time readings while adding temperature, voltage, etc.
         """
         CORE_KEYS = {'serialNumber', 'lastReportWatts', 'lastReportDate', 'maxReportWatts'}
-        for ext in extended_list:
-            sn = str(ext.get('serialNumber', ''))
+        for sn, ext in cached_ext.items():
+            if sn.startswith('_') or not isinstance(ext, dict):
+                continue  # skip meta keys like '_ext_source'
             if sn in rt_by_sn:
                 panel = rt_by_sn[sn]
                 for key, value in ext.items():
