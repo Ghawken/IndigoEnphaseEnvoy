@@ -1951,7 +1951,10 @@ class Plugin(indigo.PluginBase):
                                 is_stale = False
                                 if is_gone:
                                     is_stale = True
-                                elif report_ts > 0 and (now_epoch - report_ts) > PANEL_STALE_THRESHOLD_SECS:
+                                elif report_ts <= 0:
+                                    # No valid timestamp — treat as stale (can't trust the data)
+                                    is_stale = True
+                                elif (now_epoch - report_ts) > PANEL_STALE_THRESHOLD_SECS:
                                     is_stale = True
 
                                 if is_stale:
