@@ -1961,6 +1961,7 @@ class Plugin(indigo.PluginBase):
                                     paneldev.updateStateOnServer('deviceIsOnline', value=False, uiValue="Offline")
                                     paneldev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                     paneldev.updateStateImageOnServer(indigo.kStateImageSel.SensorTripped)
+                                    paneldev.setErrorStateOnServer(u'Offline')
                                     # Preserve the last known communication time
                                     if report_ts > 0:
                                         paneldev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
@@ -1983,7 +1984,7 @@ class Plugin(indigo.PluginBase):
                                 paneldev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                 paneldev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
                                 paneldev.setErrorStateOnServer(None)
-
+                                paneldev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
 
                                 # Extra extended fields (present when data from device_data or devstatus)
                                 if panel.get('_source') in ('device_data', 'devstatus'):
