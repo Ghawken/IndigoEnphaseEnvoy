@@ -1206,7 +1206,7 @@ class Plugin(indigo.PluginBase):
             "envoy_type": 6 * 60 * 60,  # 6 h
             "panel_inventory": 5 * 60,  # 5 min
             "panel_health": 60,  # 1 min – real-time watts
-            "panel_extended": 15 * 60,  # 15 min – extended data (voltage, temp, etc.)
+            "panel_extended": 5 * 60,  # 5 min – extended data (voltage, temp, etc.)
             "envoy_refresh": 60,  # 1 min
         }
 
@@ -2120,12 +2120,20 @@ class Plugin(indigo.PluginBase):
         * Merges in **cached** extended data (temperature, voltage,
           current, wattHours, lifetime energy …) that was last
           refreshed by ``_refreshPanelExtendedData()`` on the slower
-          ``panel_extended`` timer (~15 min).
+          ``panel_extended`` timer (~5 min).
         * For each inverter the timestamps from both sources are
           compared; whichever is **more recent** supplies both the
           watts and the timestamp so the values stay coherent.
         * Never calls ``/ivp/pdm/device_data`` or ``/ivp/peb/devstatus``
-          itself — those are fetched only on the 15-min cadence.
+          itself — those are fetched only on the 5-min cadence.
+
+        .. note::
+
+           Despite being polled every 60 s, the legacy endpoint's
+           ``lastReportDate`` often lags behind the extended data
+           sources because the Envoy firmware updates ``/ivp/peb/
+           devstatus`` and ``/ivp/pdm/device_data`` with the latest
+           scan results before updating ``/api/v1/production/inverters``.
 
         Returns a list of dicts in the unified format:
 
@@ -2186,11 +2194,20 @@ class Plugin(indigo.PluginBase):
     def _refreshPanelExtendedData(self, dev):
         """Fetch extended panel data and cache it for the fast 60 s cycle.
 
-        Called every ~15 min by the ``panel_extended`` timer.
+        Called every ~5 min by the ``panel_extended`` timer.
 
         Tries ``/ivp/pdm/device_data`` first (available with any token,
         richest data).  Falls back to ``/ivp/peb/devstatus`` (installer
         token only).
+
+        .. note::
+
+           The extended endpoints often carry **newer** per-inverter
+           timestamps than the legacy ``/api/v1/production/inverters``
+           endpoint, because the Envoy firmware updates the PEB /
+           device_data stores with scan results before updating the
+           legacy endpoint.  A 5-min cadence keeps these readings
+           reasonably fresh.
 
         The result is stored in ``self._cached_panel_extended[dev.id]``
         as a ``{serialNumber: unified_dict, …, '_ext_source': …}`` dict
