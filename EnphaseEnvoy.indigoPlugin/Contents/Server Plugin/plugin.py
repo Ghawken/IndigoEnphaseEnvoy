@@ -2145,24 +2145,36 @@ class Plugin(indigo.PluginBase):
         if self._is_installer_token(dev):
             ds_raw = self.getDevStatus(dev)
 
-        # Build {sn → epoch} lookups for each source
+        # Build {sn → epoch} and {sn → watts} lookups for each source
         legacy_ts = {}
+        legacy_w = {}
         if legacy_raw:
             for p in legacy_raw:
                 sn = str(p.get('serialNumber', ''))
                 legacy_ts[sn] = int(p.get('lastReportDate', 0))
+                legacy_w[sn] = p.get('lastReportWatts', 0)
 
         dd_ts = {}
+        dd_w = {}
         if dd_raw:
             for p in dd_raw:
                 sn = str(p.get('sn', ''))
                 dd_ts[sn] = int(p.get('last_reading', 0))
+                dd_w[sn] = p.get('watts', 0)
 
         ds_ts = {}
+        ds_w = {}
         if ds_raw:
             for p in ds_raw:
                 sn = str(p.get('sn', ''))
                 ds_ts[sn] = int(p.get('last_reading', 0))
+                # ac_power from parseDevStatus is in milliwatts
+                # (acPowerINmW doesn't match the mA/mV/mHz conversion)
+                raw_mw = p.get('ac_power', 0)
+                try:
+                    ds_w[sn] = round(float(raw_mw) / 1000, 1)
+                except (ValueError, TypeError):
+                    ds_w[sn] = 0
 
         # ── 2. Build the union of all known serial numbers ────────
         all_sns = sorted(set(list(legacy_ts.keys()) + list(dd_ts.keys()) + list(ds_ts.keys())))
@@ -2201,6 +2213,10 @@ class Plugin(indigo.PluginBase):
             ts_dd  = dd_ts.get(sn, 0)
             ts_ds  = ds_ts.get(sn, 0)
 
+            w_leg = legacy_w.get(sn, "N/A")
+            w_dd  = dd_w.get(sn, "N/A")
+            w_ds  = ds_w.get(sn, "N/A")
+
             best_ts = max(ts_leg, ts_dd, ts_ds)
             if best_ts == 0:
                 winner = "none"
@@ -2219,10 +2235,10 @@ class Plugin(indigo.PluginBase):
 
             self.logger.info(
                 f"[{dev.name}]   SN {sn}: "
-                f"legacy={_fmt(ts_leg)} ({ts_leg})  "
-                f"device_data={_fmt(ts_dd)} ({ts_dd})  "
-                f"devstatus={_fmt(ts_ds)} ({ts_ds})  "
-                f"→ WINNER: {winner}"
+                f"legacy={_fmt(ts_leg)} {w_leg}W  "
+                f"device_data={_fmt(ts_dd)} {w_dd}W  "
+                f"devstatus={_fmt(ts_ds)} {w_ds}W  "
+                f"→ {winner}"
             )
 
         self.logger.info(
