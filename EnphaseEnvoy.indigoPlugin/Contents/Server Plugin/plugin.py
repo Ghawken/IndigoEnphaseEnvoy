@@ -27,6 +27,7 @@ from os import path
 import re
 import logging
 import datetime
+import random
 import threading
 from requests.auth import HTTPDigestAuth
 import jwt
@@ -202,6 +203,8 @@ class Plugin(indigo.PluginBase):
         # Set during the first successful panel fetch; avoids re-probing
         # every 60 s.  Values: "device_data", "devstatus", "legacy", or None.
         self._panel_source = {}  # dev.id -> str | None
+        # Diagnostic: 5 random panel serial numbers kept stable per device
+        self._freshness_sample_panels = {}  # dev.id -> list[str]
 
         self.EnvoyStype = ""
         self.logger.info(u"")
@@ -1206,6 +1209,7 @@ class Plugin(indigo.PluginBase):
             "panel_inventory": 5 * 60,  # 5 min
             "panel_health": 60,  # 1 min – per-inverter watts + extended data
             "envoy_refresh": 60,  # 1 min
+            "freshness_check": 60,  # 1 min – diagnostic: compare endpoint freshness
         }
 
         # timers[dev.id][check_name] → last-run timestamp
@@ -1280,6 +1284,7 @@ class Plugin(indigo.PluginBase):
                     _run_check(ts, "panel_inventory", CHECKS["panel_inventory"], self.checkPanelInventory, dev)
                     _run_check(ts, "panel_health", CHECKS["panel_health"], self.checkThePanels_New, dev)
                     _run_check(ts, "envoy_refresh", CHECKS["envoy_refresh"], self.refreshDataForDev, dev)
+                    _run_check(ts, "freshness_check", CHECKS["freshness_check"], self._compare_panel_freshness, dev)
 
                     self.sleep(1)  # small yield between devices
 
@@ -1312,6 +1317,7 @@ class Plugin(indigo.PluginBase):
                         ts["panel_inventory"] = now
                         ts["panel_health"] = now
                         ts["envoy_refresh"] = now
+                        ts["freshness_check"] = now
                     # Leave "envoy_type" and "datetime" untouched → cadence preserved
 
                 self.sleep(25)  # base loop delay
@@ -2107,6 +2113,125 @@ class Plugin(indigo.PluginBase):
             result = None
             self.WaitInterval = 60
             return result
+
+    # ─────────────────────────────────────────────────────────────
+    # Diagnostic: compare per-inverter timestamps across all 3 endpoints
+    # ─────────────────────────────────────────────────────────────
+    def _compare_panel_freshness(self, dev):
+        """Call all 3 panel endpoints, pick 5 random panels, info-log which is newest.
+
+        This is a **diagnostic-only** function added to verify which Envoy
+        endpoint carries the most up-to-date per-inverter timestamps.
+
+        Runs every 60 s via the ``freshness_check`` timer.  The 5 sample
+        panel serial numbers are chosen once per device and re-used on
+        every subsequent call so the log output is comparable across cycles.
+
+        Can be safely commented out (or the timer removed) once testing
+        is complete.
+        """
+        if not dev.states.get('deviceIsOnline', False):
+            return
+        if not dev.pluginProps.get('activatePanels', False):
+            return
+
+        # ── 1. Fetch all three endpoints ──────────────────────────
+        # legacy  → list of {serialNumber, lastReportWatts, lastReportDate, …}
+        legacy_raw = self._getthePanels_legacy(dev)
+        # device_data → parsed list of {sn, watts, last_reading, …}
+        dd_raw = self.getDeviceData(dev)
+        # devstatus → parsed list of {sn, last_reading, ac_power, …}  (installer only)
+        ds_raw = None
+        if self._is_installer_token(dev):
+            ds_raw = self.getDevStatus(dev)
+
+        # Build {sn → epoch} lookups for each source
+        legacy_ts = {}
+        if legacy_raw:
+            for p in legacy_raw:
+                sn = str(p.get('serialNumber', ''))
+                legacy_ts[sn] = int(p.get('lastReportDate', 0))
+
+        dd_ts = {}
+        if dd_raw:
+            for p in dd_raw:
+                sn = str(p.get('sn', ''))
+                dd_ts[sn] = int(p.get('last_reading', 0))
+
+        ds_ts = {}
+        if ds_raw:
+            for p in ds_raw:
+                sn = str(p.get('sn', ''))
+                ds_ts[sn] = int(p.get('last_reading', 0))
+
+        # ── 2. Build the union of all known serial numbers ────────
+        all_sns = sorted(set(list(legacy_ts.keys()) + list(dd_ts.keys()) + list(ds_ts.keys())))
+        if not all_sns:
+            self.logger.info(f"[{dev.name}] Freshness check: no panels returned from any endpoint")
+            return
+
+        # ── 3. Pick 5 random sample panels (stable across calls) ──
+        sample = self._freshness_sample_panels.get(dev.id)
+        if not sample or not set(sample).issubset(set(all_sns)):
+            k = min(5, len(all_sns))
+            sample = random.sample(all_sns, k)
+            self._freshness_sample_panels[dev.id] = sample
+            self.logger.info(f"[{dev.name}] Freshness check: locked sample panels → {sample}")
+
+        # ── 4. Log the comparison ─────────────────────────────────
+        self.logger.info(f"[{dev.name}] ── Panel Freshness Check ({len(all_sns)} total inverters) ──")
+        sources_available = []
+        if legacy_raw:
+            sources_available.append("legacy")
+        if dd_raw:
+            sources_available.append("device_data")
+        if ds_raw:
+            sources_available.append("devstatus")
+        self.logger.info(f"[{dev.name}]   Sources responding: {', '.join(sources_available) if sources_available else 'NONE'}")
+
+        winner_tally = {"legacy": 0, "device_data": 0, "devstatus": 0, "tie": 0}
+
+        def _fmt(epoch):
+            if epoch == 0:
+                return "N/A"
+            return datetime.datetime.fromtimestamp(epoch).strftime("%H:%M:%S")
+
+        for sn in sample:
+            ts_leg = legacy_ts.get(sn, 0)
+            ts_dd  = dd_ts.get(sn, 0)
+            ts_ds  = ds_ts.get(sn, 0)
+
+            best_ts = max(ts_leg, ts_dd, ts_ds)
+            if best_ts == 0:
+                winner = "none"
+            elif [ts_leg, ts_dd, ts_ds].count(best_ts) > 1:
+                winner = "tie"
+                winner_tally["tie"] += 1
+            elif best_ts == ts_ds:
+                winner = "devstatus"
+                winner_tally["devstatus"] += 1
+            elif best_ts == ts_dd:
+                winner = "device_data"
+                winner_tally["device_data"] += 1
+            else:
+                winner = "legacy"
+                winner_tally["legacy"] += 1
+
+            self.logger.info(
+                f"[{dev.name}]   SN {sn}: "
+                f"legacy={_fmt(ts_leg)} ({ts_leg})  "
+                f"device_data={_fmt(ts_dd)} ({ts_dd})  "
+                f"devstatus={_fmt(ts_ds)} ({ts_ds})  "
+                f"→ WINNER: {winner}"
+            )
+
+        self.logger.info(
+            f"[{dev.name}]   Tally: legacy={winner_tally['legacy']}  "
+            f"device_data={winner_tally['device_data']}  "
+            f"devstatus={winner_tally['devstatus']}  "
+            f"tie={winner_tally['tie']}"
+        )
+        self.logger.info(f"[{dev.name}] ── End Freshness Check ──")
 
     def getthePanels(self, dev):
         """Fetch per-inverter panel data from the best available source.
