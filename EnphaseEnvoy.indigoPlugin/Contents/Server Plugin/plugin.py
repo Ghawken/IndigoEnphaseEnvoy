@@ -2926,7 +2926,7 @@ class Plugin(indigo.PluginBase):
             # Divide by the number of active channels to get a meaningful average.
             channels = meter.get('channels', [])
             numChannels = len(channels) if channels else 1
-            voltage = round(rawVoltage / numChannels, 1) if numChannels > 0 else round(rawVoltage, 1)
+            voltage = round(rawVoltage / numChannels, 1)
             current = round(meter.get('current', 0), 3)
             pwrFactor = round(meter.get('pwrFactor', 0), 2)
             freq = round(meter.get('freq', 0), 3)
@@ -3222,7 +3222,7 @@ class Plugin(indigo.PluginBase):
                         if self.debugLevel >= 2:
                             self.logger.debug(u'**CHANGED**: Neutral (within buffer)')
                         dev.updateStateOnServer('powerStatus', value='neutral', uiValue='Neutral')
-                        dev.updateStateOnServer('generatingPower', value=True)
+                        dev.updateStateOnServer('generatingPower', value=(productionWatts > 0))
                         dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
             elif envoyType == "Unmetered":
             # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
