@@ -205,6 +205,9 @@ class Plugin(indigo.PluginBase):
         self._panel_source = {}  # dev.id -> str | None
         # Diagnostic: 5 random panel serial numbers kept stable per device
         self._freshness_sample_panels = {}  # dev.id -> list[str]
+        # On-demand freshness check thread + stop event
+        self._freshness_thread = None       # threading.Thread | None
+        self._freshness_stop = threading.Event()
 
         self.EnvoyStype = ""
         self.logger.info(u"")
@@ -1209,7 +1212,6 @@ class Plugin(indigo.PluginBase):
             "panel_inventory": 5 * 60,  # 5 min
             "panel_health": 60,  # 1 min – per-inverter watts + extended data
             "envoy_refresh": 60,  # 1 min
-            "freshness_check": 60,  # 1 min – diagnostic: compare endpoint freshness
         }
 
         # timers[dev.id][check_name] → last-run timestamp
@@ -1284,7 +1286,6 @@ class Plugin(indigo.PluginBase):
                     _run_check(ts, "panel_inventory", CHECKS["panel_inventory"], self.checkPanelInventory, dev)
                     _run_check(ts, "panel_health", CHECKS["panel_health"], self.checkThePanels_New, dev)
                     _run_check(ts, "envoy_refresh", CHECKS["envoy_refresh"], self.refreshDataForDev, dev)
-                    _run_check(ts, "freshness_check", CHECKS["freshness_check"], self._compare_panel_freshness, dev)
 
                     self.sleep(1)  # small yield between devices
 
@@ -1317,7 +1318,6 @@ class Plugin(indigo.PluginBase):
                         ts["panel_inventory"] = now
                         ts["panel_health"] = now
                         ts["envoy_refresh"] = now
-                        ts["freshness_check"] = now
                     # Leave "envoy_type" and "datetime" untouched → cadence preserved
 
                 self.sleep(25)  # base loop delay
@@ -2115,26 +2115,93 @@ class Plugin(indigo.PluginBase):
             return result
 
     # ─────────────────────────────────────────────────────────────
-    # Diagnostic: compare per-inverter timestamps across all 3 endpoints
+    # On-demand diagnostic: compare per-inverter timestamps across
+    # all 3 endpoints.  Triggered from the Plugin menu; runs in its
+    # own thread for ≤15 minutes, polling every 60 s.
     # ─────────────────────────────────────────────────────────────
+    def startFreshnessCheck(self):
+        """Menu callback – start the panel freshness diagnostic.
+
+        Iterates all enabled EnphaseEnvoyDevice devices that have
+        ``activatePanels`` turned on.  A single background thread is
+        created; it runs for up to 15 minutes (or until
+        ``stopFreshnessCheck`` is called).
+        """
+        if self._freshness_thread is not None and self._freshness_thread.is_alive():
+            self.logger.warning("Panel freshness check is already running.  "
+                                "Use 'Stop Panel Freshness Check' to cancel it first.")
+            return
+
+        self._freshness_stop.clear()
+        # Pick fresh random panels for every device at the start of each run
+        self._freshness_sample_panels.clear()
+        self._freshness_thread = threading.Thread(
+            target=self._freshness_thread_loop, daemon=True
+        )
+        self._freshness_thread.start()
+        self.logger.info("Panel freshness check started (runs for up to 15 minutes).")
+
+    def stopFreshnessCheck(self):
+        """Menu callback – stop the running freshness diagnostic early."""
+        if self._freshness_thread is None or not self._freshness_thread.is_alive():
+            self.logger.info("Panel freshness check is not running.")
+            return
+        self._freshness_stop.set()
+        self.logger.info("Panel freshness check stop requested – will finish current cycle and exit.")
+
+    # ── background thread entry point ────────────────────────────
+    def _freshness_thread_loop(self):
+        """Runs _compare_panel_freshness every 60 s for up to 15 min."""
+        DURATION = 15 * 60   # 15 minutes
+        INTERVAL = 60        # poll every 60 s
+        start = time.monotonic()
+
+        try:
+            while not self._freshness_stop.is_set():
+                elapsed = time.monotonic() - start
+                if elapsed >= DURATION:
+                    self.logger.info("Panel freshness check: 15-minute window reached – stopping automatically.")
+                    break
+
+                remaining_min = (DURATION - elapsed) / 60.0
+                self.logger.info(f"Panel freshness check: {remaining_min:.1f} min remaining")
+
+                for dev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
+                    if self._freshness_stop.is_set():
+                        break
+                    if not dev.enabled:
+                        continue
+                    if not dev.states.get('deviceIsOnline', False):
+                        continue
+                    if not dev.pluginProps.get('activatePanels', False):
+                        continue
+                    try:
+                        self._compare_panel_freshness(dev)
+                    except Exception:
+                        self.logger.exception(f"Freshness check failed for {dev.name}")
+
+                # Sleep in 1-s increments so we can respond to stop quickly
+                for _ in range(INTERVAL):
+                    if self._freshness_stop.is_set():
+                        break
+                    time.sleep(1)
+
+        except Exception:
+            self.logger.exception("Freshness check thread crashed")
+        finally:
+            self.logger.info("Panel freshness check finished.")
+
+    # ── single-pass comparison (called by the thread) ────────────
     def _compare_panel_freshness(self, dev):
         """Call all 3 panel endpoints, pick 5 random panels, info-log which is newest.
 
-        This is a **diagnostic-only** function added to verify which Envoy
-        endpoint carries the most up-to-date per-inverter timestamps.
+        This is a **diagnostic-only** helper used by the on-demand
+        freshness-check thread (started from the Plugin menu).
 
-        Runs every 60 s via the ``freshness_check`` timer.  The 5 sample
-        panel serial numbers are chosen once per device and re-used on
-        every subsequent call so the log output is comparable across cycles.
-
-        Can be safely commented out (or the timer removed) once testing
-        is complete.
+        The 5 sample panel serial numbers are chosen once per run and
+        re-used on every subsequent call so the log output is comparable
+        across cycles.
         """
-        if not dev.states.get('deviceIsOnline', False):
-            return
-        if not dev.pluginProps.get('activatePanels', False):
-            return
-
         # ── 1. Fetch all three endpoints ──────────────────────────
         # legacy  → list of {serialNumber, lastReportWatts, lastReportDate, …}
         legacy_raw = self._getthePanels_legacy(dev)
@@ -2169,7 +2236,6 @@ class Plugin(indigo.PluginBase):
                 sn = str(p.get('sn', ''))
                 ds_ts[sn] = int(p.get('last_reading', 0))
                 # ac_power from parseDevStatus is in milliwatts
-                # (acPowerINmW doesn't match the mA/mV/mHz conversion)
                 raw_mw = p.get('ac_power', 0)
                 try:
                     ds_w[sn] = round(float(raw_mw) / 1000, 1)
@@ -2182,7 +2248,7 @@ class Plugin(indigo.PluginBase):
             self.logger.info(f"[{dev.name}] Freshness check: no panels returned from any endpoint")
             return
 
-        # ── 3. Pick 5 random sample panels (stable across calls) ──
+        # ── 3. Pick 5 random sample panels (stable across the run) ──
         sample = self._freshness_sample_panels.get(dev.id)
         if not sample or not set(sample).issubset(set(all_sns)):
             k = min(5, len(all_sns))
