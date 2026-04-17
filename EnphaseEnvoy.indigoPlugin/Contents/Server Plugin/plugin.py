@@ -2172,7 +2172,7 @@ class Plugin(indigo.PluginBase):
         cached = self._cached_panel_extended.get(dev.id)
         if cached:
             # Return the cached unified dicts as a list
-            panels = [v for k, v in cached.items() if k != '_ext_source' and isinstance(v, dict)]
+            panels = [v for k, v in cached.items() if not k.startswith('_') and isinstance(v, dict)]
             if panels:
                 source = cached.get('_ext_source', 'cached')
                 try:
@@ -2267,7 +2267,7 @@ class Plugin(indigo.PluginBase):
                 except (ValueError, TypeError):
                     rt_ts = 0
                 try:
-                    ext_ts = int(ext.get('lastReportDate', 0)) if ext.get('lastReportDate') else 0
+                    ext_ts = int(ext.get('lastReportDate') or 0)
                 except (ValueError, TypeError):
                     ext_ts = 0
 
