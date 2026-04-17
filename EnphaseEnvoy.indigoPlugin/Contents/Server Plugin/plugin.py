@@ -2463,7 +2463,7 @@ class Plugin(indigo.PluginBase):
                 except (ValueError, TypeError):
                     rt_ts = 0
                 try:
-                    ext_ts = int(ext.get('lastReportDate', 0)) if ext.get('lastReportDate') else 0
+                    ext_ts = int(ext.get('lastReportDate', 0))
                 except (ValueError, TypeError):
                     ext_ts = 0
 
