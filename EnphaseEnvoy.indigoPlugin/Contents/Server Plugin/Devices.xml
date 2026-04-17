@@ -191,6 +191,11 @@
         <TriggerLabel>UTC Time of last Panel Check</TriggerLabel>
         <ControlPageLabel>UTC Time of last Panel Check</ControlPageLabel>
       </State>
+        <State id="panelDataSource">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Panel Data Source Endpoint</TriggerLabel>
+        <ControlPageLabel>Panel Data Source Endpoint</ControlPageLabel>
+      </State>
         <State id="panelLastUpdated">
         <ValueType>String</ValueType>
         <TriggerLabel>DateTime of last Panel Check</TriggerLabel>

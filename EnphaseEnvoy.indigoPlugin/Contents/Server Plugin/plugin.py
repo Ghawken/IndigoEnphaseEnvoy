@@ -25,6 +25,7 @@ import flatdict
 import traceback
 from os import path
 import re
+import random
 import logging
 import datetime
 import threading
@@ -71,7 +72,7 @@ POWER_FORCED_OFF_TRUE = 1   # production disabled
 ENVOY_TARIFF_PATH = "/admin/lib/tariff"
 ENVOY_GRID_RELAY_PATH = "/ivp/ensemble/relay"
 ENVOY_DPEL_PATH = "/ivp/ss/dpel"
-PANEL_STALE_THRESHOLD_SECS = 15 * 60  # 15 minutes
+PANEL_STALE_THRESHOLD_SECS = 25 * 60  # 15 minutes
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -198,6 +199,10 @@ class Plugin(indigo.PluginBase):
         self.generated_token_expiry = datetime.datetime.now()
         self.serial_number_full = {}  # dev.id -> full serial
         self.serial_number_last_six = {}  # dev.id -> last 6
+        self._cached_panel_extended = {}  # dev.id -> {sn: panel_dict, ...}
+        self._freshness_sample_panels = {}  # dev.id -> list[str]
+        self._freshness_thread = None       # threading.Thread | None
+        self._freshness_stop = threading.Event()
 
         self.EnvoyStype = ""
         self.logger.info(u"")
@@ -1201,7 +1206,9 @@ class Plugin(indigo.PluginBase):
             "envoy_type": 6 * 60 * 60,  # 6 h
             "panel_inventory": 5 * 60,  # 5 min
             "panel_health": 60,  # 3 min 20 s
+            "panel_extended": 15 * 60,  # 15 min – extended data (voltage, temp, etc.)
             "envoy_refresh": 60,  # 1 min
+         #   "freshness_check": 60,  # 1 min – diagnostic: compare endpoint freshness
         }
 
         # timers[dev.id][check_name] → last-run timestamp
@@ -1272,9 +1279,10 @@ class Plugin(indigo.PluginBase):
                     _run_check(ts, "datetime", CHECKS["datetime"], self.checkDayTime, dev)
                     _run_check(ts, "envoy_type", CHECKS["envoy_type"], self.checkEnvoyType, dev)
                     _run_check(ts, "panel_inventory", CHECKS["panel_inventory"], self.checkPanelInventory, dev)
+                    _run_check(ts, "panel_extended", CHECKS["panel_extended"], self._refreshPanelExtendedData, dev)
                     _run_check(ts, "panel_health", CHECKS["panel_health"], self.checkThePanels_New, dev)
                     _run_check(ts, "envoy_refresh", CHECKS["envoy_refresh"], self.refreshDataForDev, dev)
-
+                  #  _run_check(ts, "freshness_check", CHECKS["freshness_check"], self._compare_panel_freshness, dev)
                     self.sleep(1)  # small yield between devices
 
                 # Legacy Envoy devices
@@ -1305,6 +1313,7 @@ class Plugin(indigo.PluginBase):
                     for ts in timers.values():
                         ts["panel_inventory"] = now
                         ts["panel_health"] = now
+                        ts["panel_extended"] = now
                         ts["envoy_refresh"] = now
                     # Leave "envoy_type" and "datetime" untouched → cadence preserved
 
@@ -1315,6 +1324,207 @@ class Plugin(indigo.PluginBase):
         except Exception:
             self.logger.exception("Unhandled exception in Enphase/Envoy thread")
             self.WaitInterval = 60
+
+    # ─────────────────────────────────────────────────────────────
+    # On-demand diagnostic: compare per-inverter timestamps across
+    # all 3 endpoints.  Triggered from the Plugin menu; runs in its
+    # own thread for ≤15 minutes, polling every 60 s.
+    # ─────────────────────────────────────────────────────────────
+    def startFreshnessCheck(self):
+        """Menu callback – start the panel freshness diagnostic.
+
+        Iterates all enabled EnphaseEnvoyDevice devices that have
+        ``activatePanels`` turned on.  A single background thread is
+        created; it runs for up to 15 minutes (or until
+        ``stopFreshnessCheck`` is called).
+        """
+        if self._freshness_thread is not None and self._freshness_thread.is_alive():
+            self.logger.warning("Panel freshness check is already running.  "
+                                "Use 'Stop Panel Freshness Check' to cancel it first.")
+            return
+
+        self._freshness_stop.clear()
+        # Pick fresh random panels for every device at the start of each run
+        self._freshness_sample_panels.clear()
+        self._freshness_thread = threading.Thread(
+            target=self._freshness_thread_loop, daemon=True
+        )
+        self._freshness_thread.start()
+        self.logger.info("Panel freshness check started (runs for up to 15 minutes).")
+
+    def stopFreshnessCheck(self):
+        """Menu callback – stop the running freshness diagnostic early."""
+        if self._freshness_thread is None or not self._freshness_thread.is_alive():
+            self.logger.info("Panel freshness check is not running.")
+            return
+        self._freshness_stop.set()
+        self.logger.info("Panel freshness check stop requested – will finish current cycle and exit.")
+
+    # ── background thread entry point ────────────────────────────
+    def _freshness_thread_loop(self):
+        """Runs _compare_panel_freshness every 60 s for up to 15 min."""
+        DURATION = 15 * 60   # 15 minutes
+        INTERVAL = 60        # poll every 60 s
+        start = time.monotonic()
+
+        try:
+            while not self._freshness_stop.is_set():
+                elapsed = time.monotonic() - start
+                if elapsed >= DURATION:
+                    self.logger.info("Panel freshness check: 15-minute window reached – stopping automatically.")
+                    break
+
+                remaining_min = (DURATION - elapsed) / 60.0
+                self.logger.info(f"Panel freshness check: {remaining_min:.1f} min remaining")
+
+                for dev in indigo.devices.iter('self.EnphaseEnvoyDevice'):
+                    if self._freshness_stop.is_set():
+                        break
+                    if not dev.enabled:
+                        continue
+                    if not dev.states.get('deviceIsOnline', False):
+                        continue
+                    if not dev.pluginProps.get('activatePanels', False):
+                        continue
+                    try:
+                        self._compare_panel_freshness(dev)
+                    except Exception:
+                        self.logger.exception(f"Freshness check failed for {dev.name}")
+
+                # Sleep in 1-s increments so we can respond to stop quickly
+                for _ in range(INTERVAL):
+                    if self._freshness_stop.is_set():
+                        break
+                    time.sleep(1)
+
+        except Exception:
+            self.logger.exception("Freshness check thread crashed")
+        finally:
+            self.logger.info("Panel freshness check finished.")
+
+    # ── single-pass comparison (called by the thread) ────────────
+    def _compare_panel_freshness(self, dev):
+        """Call all 3 panel endpoints, pick 5 random panels, info-log which is newest.
+
+        This is a **diagnostic-only** helper used by the on-demand
+        freshness-check thread (started from the Plugin menu).
+
+        The 5 sample panel serial numbers are chosen once per run and
+        re-used on every subsequent call so the log output is comparable
+        across cycles.
+        """
+        # ── 1. Fetch all three endpoints ──────────────────────────
+        # legacy  → list of {serialNumber, lastReportWatts, lastReportDate, …}
+        legacy_raw = self._getthePanels_legacy(dev)
+        # device_data → parsed list of {sn, watts, last_reading, …}
+        dd_raw = self.getDeviceData(dev)
+        # devstatus → parsed list of {sn, last_reading, ac_power, …}  (installer only)
+        ds_raw = None
+        if self._is_installer_token(dev):
+            ds_raw = self.getDevStatus(dev)
+
+        # Build {sn → epoch} and {sn → watts} lookups for each source
+        legacy_ts = {}
+        legacy_w = {}
+        if legacy_raw:
+            for p in legacy_raw:
+                sn = str(p.get('serialNumber', ''))
+                legacy_ts[sn] = int(p.get('lastReportDate', 0))
+                legacy_w[sn] = p.get('lastReportWatts', 0)
+
+        dd_ts = {}
+        dd_w = {}
+        if dd_raw:
+            for p in dd_raw:
+                sn = str(p.get('sn', ''))
+                dd_ts[sn] = int(p.get('last_reading', 0))
+                dd_w[sn] = p.get('watts', 0)
+
+        ds_ts = {}
+        ds_w = {}
+        if ds_raw:
+            for p in ds_raw:
+                sn = str(p.get('sn', ''))
+                ds_ts[sn] = int(p.get('last_reading', 0))
+                # ac_power from parseDevStatus is in milliwatts
+                raw_mw = p.get('ac_power', 0)
+                try:
+                    ds_w[sn] = round(float(raw_mw) / 1000, 1)
+                except (ValueError, TypeError):
+                    ds_w[sn] = 0
+
+        # ── 2. Build the union of all known serial numbers ────────
+        all_sns = sorted(set(list(legacy_ts.keys()) + list(dd_ts.keys()) + list(ds_ts.keys())))
+        if not all_sns:
+            self.logger.info(f"[{dev.name}] Freshness check: no panels returned from any endpoint")
+            return
+
+        # ── 3. Pick 5 random sample panels (stable across the run) ──
+        sample = self._freshness_sample_panels.get(dev.id)
+        if not sample or not set(sample).issubset(set(all_sns)):
+            k = min(5, len(all_sns))
+            sample = random.sample(all_sns, k)
+            self._freshness_sample_panels[dev.id] = sample
+            self.logger.info(f"[{dev.name}] Freshness check: locked sample panels → {sample}")
+
+        # ── 4. Log the comparison ─────────────────────────────────
+        self.logger.info(f"[{dev.name}] ── Panel Freshness Check ({len(all_sns)} total inverters) ──")
+        sources_available = []
+        if legacy_raw:
+            sources_available.append("legacy")
+        if dd_raw:
+            sources_available.append("device_data")
+        if ds_raw:
+            sources_available.append("devstatus")
+        self.logger.info(f"[{dev.name}]   Sources responding: {', '.join(sources_available) if sources_available else 'NONE'}")
+
+        winner_tally = {"legacy": 0, "device_data": 0, "devstatus": 0, "tie": 0}
+
+        def _fmt(epoch):
+            if epoch == 0:
+                return "N/A"
+            return datetime.datetime.fromtimestamp(epoch).strftime("%H:%M:%S")
+
+        for sn in sample:
+            ts_leg = legacy_ts.get(sn, 0)
+            ts_dd  = dd_ts.get(sn, 0)
+            ts_ds  = ds_ts.get(sn, 0)
+
+            w_leg = legacy_w.get(sn, "N/A")
+            w_dd  = dd_w.get(sn, "N/A")
+            w_ds  = ds_w.get(sn, "N/A")
+
+            best_ts = max(ts_leg, ts_dd, ts_ds)
+            if best_ts == 0:
+                winner = "none"
+            elif [ts_leg, ts_dd, ts_ds].count(best_ts) > 1:
+                winner = "tie"
+                winner_tally["tie"] += 1
+            elif best_ts == ts_ds:
+                winner = "devstatus"
+                winner_tally["devstatus"] += 1
+            elif best_ts == ts_dd:
+                winner = "device_data"
+                winner_tally["device_data"] += 1
+            else:
+                winner = "legacy"
+                winner_tally["legacy"] += 1
+
+            self.logger.info(
+                f"[{dev.name}]   SN {sn}: "
+                f"legacy={_fmt(ts_leg)} {w_leg}W  "
+                f"device_data={_fmt(ts_dd)} {w_dd}W  "
+                f"devstatus={_fmt(ts_ds)} {w_ds}W  "
+                f"→ {winner}"
+            )
+
+        self.logger.info(
+            f"[{dev.name}]   Tally: legacy={winner_tally['legacy']}  "
+            f"device_data={winner_tally['device_data']}  "
+            f"devstatus={winner_tally['devstatus']}  "
+            f"tie={winner_tally['tie']}"
+        )
+        self.logger.info(f"[{dev.name}] ── End Freshness Check ──")
 
 
     def checkDayTime(self, device):
@@ -1945,6 +2155,8 @@ class Plugin(indigo.PluginBase):
                                             f"Panel {panel['serialNumber']} marked stale/offline "
                                             f"(gone={is_gone}, last_report_age={age_mins} min)")
                                     continue
+                                else:
+                                    paneldev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
 
                                 # Panel is online and current
                                 paneldev.updateStateOnServer('watts',value=int(panel['lastReportWatts']),uiValue=str(panel['lastReportWatts']))
@@ -2082,27 +2294,24 @@ class Plugin(indigo.PluginBase):
             return result
 
     def getthePanels(self, dev):
-        """Fetch per-inverter panel data.
+        """Fetch per-inverter **real-time watts** and merge cached extended data.
 
-        Tries endpoints in order of richness:
+        Called every ~60 s by the ``panel_health`` timer.
 
-        1. ``/ivp/pdm/device_data`` — available with any token.
-           Returns watts, watts_max, wattHours today/week,
-           AC voltage/current/frequency, DC voltage/current,
-           temperature, lifetime energy, RSSI, etc.
+        * Always fetches ``/api/v1/production/inverters`` for near-
+          real-time watt/timestamp readings (< 1 min delay).
+        * Merges in **cached** extended data (temperature, voltage,
+          current, wattHours, lifetime energy …) that was last
+          refreshed by ``_refreshPanelExtendedData()`` on the slower
+          ``panel_extended`` timer (~15 min).
+        * Never calls ``/ivp/pdm/device_data`` or ``/ivp/peb/devstatus``
+          itself — those are fetched only on the 15-min cadence.
 
-        2. ``/ivp/peb/devstatus`` — installer token only.
-           Returns AC power, DC voltage/current, temperature.
-
-        3. ``/api/v1/production/inverters`` — legacy fallback.
-
-        Returns a list of dicts in a **unified format** that always
-        contains the standard keys used by callers:
+        Returns a list of dicts in the unified format:
 
             serialNumber, lastReportWatts, lastReportDate, maxReportWatts
 
-        When data comes from device_data or devstatus, additional keys
-        are present for extended panel states.
+        with extended keys when cached enrichment data is available.
         """
         if self.debugLevel >= 2:
             self.logger.debug(u"getthePanels Enphase Envoy method called.")
@@ -2110,27 +2319,145 @@ class Plugin(indigo.PluginBase):
         if not dev.states['deviceIsOnline']:
             return None
 
-        # ── Try device_data first (any token, richest data) ─────
+        # ── 1. Real-time watts from /api/v1/production/inverters ──
+        realtime = self._getthePanels_legacy(dev)
+        source = "inverters"
+
+        if realtime:
+            # Build a serial-number → dict lookup for the real-time data
+            rt_by_sn = {str(p['serialNumber']): p for p in realtime}
+
+            # ── 2. Merge cached extended data (if any) ───────────
+            cached = self._cached_panel_extended.get(dev.id)
+            if cached:
+                self._enrich_panels(rt_by_sn, cached, cached.get('_ext_source', 'cached'))
+                source = f"inverters+{cached.get('_ext_source', 'cached')}"
+
+            # Update the data-source state on the Envoy device
+            try:
+                dev.updateStateOnServer('panelDataSource', value=source)
+            except Exception:
+                pass  # state may not exist on older device configs
+
+            if self.debugLevel >= 2:
+                self.logger.debug(
+                    f"getthePanels: returning {len(realtime)} inverters "
+                    f"(source={source})"
+                )
+            return realtime
+
+        # ── Fallback: if the legacy endpoint failed, use cached extended ──
+        # ── data alone (it at least has watts, albeit delayed).           ──
+        self.logger.debug("getthePanels: no data from /api/v1/production/inverters, using cached extended data if available")
+        cached = self._cached_panel_extended.get(dev.id)
+        if cached:
+            # Return the cached unified dicts as a list
+            panels = [v for k, v in cached.items() if k != '_ext_source' and isinstance(v, dict)]
+            if panels:
+                source = cached.get('_ext_source', 'cached')
+                try:
+                    dev.updateStateOnServer('panelDataSource', value=source)
+                except Exception:
+                    pass
+                return panels
+
+        return None
+
+    def _refreshPanelExtendedData(self, dev):
+        """Fetch extended panel data and cache it for the fast 60 s cycle.
+
+        Called every ~15 min by the ``panel_extended`` timer.
+
+        Tries ``/ivp/pdm/device_data`` first (available with any token,
+        richest data).  Falls back to ``/ivp/peb/devstatus`` (installer
+        token only).
+
+        The result is stored in ``self._cached_panel_extended[dev.id]``
+        as a ``{serialNumber: unified_dict, …, '_ext_source': …}`` dict
+        so that ``getthePanels()`` can merge it into fresh real-time
+        watts without making additional HTTP calls.
+        """
+        if not dev.states.get('deviceIsOnline', False):
+            return
+        if not dev.pluginProps.get('activatePanels', False):
+            return
+
+        ext_source = None
+        unified_ext = None
+
+        # Try device_data first (any token, richest extended data)
         device_data = self.getDeviceData(dev)
         if device_data:
-            unified = self._devicedata_to_unified(device_data)
-            if unified:
-                if self.debugLevel >= 2:
-                    self.logger.debug(f"getthePanels: using device_data endpoint ({len(unified)} inverters)")
-                return unified
+            unified_ext = self._devicedata_to_unified(device_data)
+            if unified_ext:
+                ext_source = "device_data"
 
-        # ── Try devstatus (installer token) ─────────────────────
-        if self._is_installer_token(dev):
+        # If device_data was not available, try devstatus (installer token)
+        if unified_ext is None and self._is_installer_token(dev):
             devstatus = self.getDevStatus(dev)
             if devstatus:
-                unified = self._devstatus_to_unified(devstatus)
-                if unified:
-                    if self.debugLevel >= 2:
-                        self.logger.debug(f"getthePanels: using devstatus endpoint ({len(unified)} inverters)")
-                    return unified
+                unified_ext = self._devstatus_to_unified(devstatus)
+                if unified_ext:
+                    ext_source = "devstatus"
 
-        # ── Legacy endpoint ─────────────────────────────────────
-        return self._getthePanels_legacy(dev)
+        if unified_ext:
+            # Store as a {serialNumber → dict} lookup, plus a meta key
+            cache = {str(p['serialNumber']): p for p in unified_ext}
+            cache['_ext_source'] = ext_source
+            self._cached_panel_extended[dev.id] = cache
+            self.logger.debug(
+                f"Cached extended panel data for {dev.name}: "
+                f"{len(unified_ext)} inverters from {ext_source}"
+            )
+        else:
+            if self.debugLevel >= 2:
+                self.logger.debug(
+                    f"No extended panel data available for {dev.name}"
+                )
+
+    def _enrich_panels(self, rt_by_sn, cached_ext, ext_source):
+        """Merge cached extended fields into real-time panel dicts.
+
+        *rt_by_sn* is a {serialNumber: dict} lookup of real-time data.
+        *cached_ext* is the cache dict {serialNumber: unified_dict, '_ext_source': …}.
+        *ext_source* is 'device_data' or 'devstatus' — stored as ``_source``.
+
+        Core real-time keys (serialNumber, lastReportWatts, maxReportWatts)
+        are never overwritten by extended data.
+
+        ``lastReportDate`` is special-cased: the **most recent** timestamp
+        from either source is kept so that stale-panel detection always
+        uses the freshest available reading.
+        """
+        CORE_KEYS = {'serialNumber', 'lastReportWatts', 'maxReportWatts'}
+        for sn, ext in cached_ext.items():
+            if sn.startswith('_') or not isinstance(ext, dict):
+                continue  # skip meta keys like '_ext_source'
+            if sn in rt_by_sn:
+                panel = rt_by_sn[sn]
+                for key, value in ext.items():
+                    if key in CORE_KEYS:
+                        continue
+                    if key == 'lastReportDate':
+                        # Keep the most recent timestamp from either source
+                        try:
+                            rt_ts = int(panel.get('lastReportDate', 0))
+                        except (ValueError, TypeError):
+                            rt_ts = 0
+                        try:
+                            ext_ts = int(value) if value else 0
+                        except (ValueError, TypeError):
+                            ext_ts = 0
+                        if ext_ts > rt_ts:
+                            if self.debugLevel >= 2:
+                                self.logger.debug(
+                                    f"_enrich_panels: {sn} using newer lastReportDate "
+                                    f"from {ext_source} ({ext_ts}) over legacy ({rt_ts})"
+                                )
+                            panel['lastReportDate'] = ext_ts
+                        continue
+                    panel[key] = value
+                panel['_source'] = ext_source
 
 
     def _devicedata_to_unified(self, devicedata_list):

@@ -1,8 +1,12 @@
 <?xml version="1.0"?>
 <MenuItems>
-  <MenuItem id="refreshData">
-    <Name>Refresh Data Now...</Name>
-    <CallbackMethod>refreshDatafromMenu</CallbackMethod>
+  <MenuItem id="startFreshnessCheck">
+    <Name>Start Panel Freshness Check (15 min)...</Name>
+    <CallbackMethod>startFreshnessCheck</CallbackMethod>
+  </MenuItem>
+  <MenuItem id="stopFreshnessCheck">
+    <Name>Stop Panel Freshness Check</Name>
+    <CallbackMethod>stopFreshnessCheck</CallbackMethod>
   </MenuItem>
 
   <MenuItem id="toggleDebug">
