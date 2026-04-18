@@ -3147,7 +3147,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('consumptionwhLifetime', value=int(0),uiValue="Not Reported")
                     dev.updateStateOnServer('netConsumptionWattsNow', value=int(0),uiValue="Not Reported")
                     dev.updateStateOnServer('grid_usage', value=0, uiValue="Not Reported")
-                    dev.updateStateOnServer('grid_in_use', value=False)
+                    dev.updateStateOnServer('grid_in_use', value=False, uiValue="Not Reported")
 
                     # if consumptionData is not None:
                     #     if 'wattsNow' in consumptionData:
