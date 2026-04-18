@@ -3135,9 +3135,9 @@ class Plugin(indigo.PluginBase):
                         dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
 
                     # grid_usage: positive = pulling from grid, negative = sending to grid
-                    # grid_in_use: true when grid flow exceeds buffer threshold
+                    # grid_in_use: true only when importing from the grid (positive net consumption above buffer)
                     dev.updateStateOnServer('grid_usage', value=netConsumption)
-                    dev.updateStateOnServer('grid_in_use', value=(abs(netConsumption) > POWER_STATUS_BUFFER))
+                    dev.updateStateOnServer('grid_in_use', value=(netConsumption > POWER_STATUS_BUFFER))
             elif envoyType == "Unmetered":
                     # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
                     # not consumption data appears possible
