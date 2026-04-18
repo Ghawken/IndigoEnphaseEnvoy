@@ -73,6 +73,8 @@ ENVOY_TARIFF_PATH = "/admin/lib/tariff"
 ENVOY_GRID_RELAY_PATH = "/ivp/ensemble/relay"
 ENVOY_DPEL_PATH = "/ivp/ss/dpel"
 PANEL_STALE_THRESHOLD_SECS = 25 * 60  # 15 minutes
+POWER_STATUS_BUFFER = 100
+
 
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
@@ -513,6 +515,8 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('netConsumptionWattsNow', value=0)
             dev.updateStateOnServer('production7days', value=0)
             dev.updateStateOnServer('consumption7days', value=0)
+            dev.updateStateOnServer('grid_usage', value=0)
+            dev.updateStateOnServer('grid_in_use', value=False)
             dev.updateStateOnServer('consumptionWattsToday', value=0)
             dev.updateStateOnServer('productionWattsToday', value=0)
             dev.updateStateOnServer('storageActiveCount', value=0)
@@ -2918,7 +2922,12 @@ class Plugin(indigo.PluginBase):
         """Update aggregate (total) meter states for production or consumption."""
         prefix = meterType  # 'production' or 'consumption'
         try:
-            voltage = round(meter.get('voltage', 0), 1)
+            rawVoltage = meter.get('voltage', 0)
+            # The meter-level voltage is the sum of all phase voltages.
+            # Divide by the number of active channels to get a meaningful average.
+            channels = meter.get('channels', [])
+            numChannels = len(channels) if channels else 1
+            voltage = round(rawVoltage / numChannels, 1) if numChannels > 0 else round(rawVoltage, 1)
             current = round(meter.get('current', 0), 3)
             pwrFactor = round(meter.get('pwrFactor', 0), 2)
             freq = round(meter.get('freq', 0), 3)
@@ -3113,7 +3122,8 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('consumptionwhLifetime',  value=int(data['consumption'][0]['whLifetime']))
                     dev.updateStateOnServer('consumptionWattsToday', value=int(data['consumption'][0]['whToday']))
                     if len(data['consumption'])>1:
-                        dev.updateStateOnServer('netConsumptionWattsNow', value=int(data['consumption'][1]['wNow']))
+                        netConsumption = int(data['consumption'][1]['wNow'])
+                        dev.updateStateOnServer('netConsumptionWattsNow', value=netConsumption)
                         dev.updateStateOnServer('netconsumptionwhLifetime',value=int(data['consumption'][1]['whLifetime']))
                     else:
                         if self.debugLevel >=2:
@@ -3122,6 +3132,10 @@ class Plugin(indigo.PluginBase):
                         #
                         netConsumption = int(consumptionWatts) - int(productionWatts)
                         dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
+                    # grid_usage: positive = pulling from grid, negative = sending to grid
+                    # grid_in_use: true when grid flow exceeds buffer threshold
+                    dev.updateStateOnServer('grid_usage', value=netConsumption)
+                    dev.updateStateOnServer('grid_in_use', value=(abs(netConsumption) > POWER_STATUS_BUFFER))
             elif envoyType == "Unmetered":
                     # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
                     # not consumption data appears possible
@@ -3130,6 +3144,8 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('consumptionWattsToday', value=int(0),uiValue="Not Reported")
                     dev.updateStateOnServer('consumptionwhLifetime', value=int(0),uiValue="Not Reported")
                     dev.updateStateOnServer('netConsumptionWattsNow', value=int(0),uiValue="Not Reported")
+                    dev.updateStateOnServer('grid_usage', value=0, uiValue="Not Reported")
+                    dev.updateStateOnServer('grid_in_use', value=False, uiValue="Not Reported")
 
                     # if consumptionData is not None:
                     #     if 'wattsNow' in consumptionData:
@@ -3183,28 +3199,41 @@ class Plugin(indigo.PluginBase):
 
 
             if envoyType == "Metered":
+                # Use a buffer to avoid constant flipping between importing/exporting
+                # when batteries cover most load but a few watts still flow either way.
+                powerDiff = productionWatts - consumptionWatts
+                currentStatus = dev.states.get('powerStatus', 'offline')
 
-                if productionWatts >= consumptionWatts and (dev.states['powerStatus']=='importing' or dev.states['powerStatus']=='offline'):
-                    #Generating more Power - and a change
-                    # If Generating Power - but device believes importing - recent change unpdate to refleect
-                    if self.debugLevel >= 2:
-                        self.logger.debug(u'**CHANGED**: Exporting Power')
+                if powerDiff > POWER_STATUS_BUFFER:
+                    # Clearly exporting
+                    if currentStatus != 'exporting':
+                        if self.debugLevel >= 2:
+                            self.logger.debug(u'**CHANGED**: Exporting Power')
+                        dev.updateStateOnServer('powerStatus', value='exporting', uiValue='Exporting Power')
+                        dev.updateStateOnServer('generatingPower', value=True)
+                        dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
+                        if self.debugLevel >= 2:
+                            self.logger.debug("State Image Selector:" + str(dev.displayStateImageSel))
+                elif powerDiff < -POWER_STATUS_BUFFER:
+                    # Clearly importing
+                    if currentStatus != 'importing':
+                        if self.debugLevel >= 2:
+                            self.logger.debug(u'**CHANGED**: Importing power')
+                        dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
+                        dev.updateStateOnServer('generatingPower', value=False)
+                        dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
+                        if self.debugLevel >= 2:
+                            self.logger.debug(u"State Image Selector:" + str(dev.displayStateImageSel))
+                else:
+                    # Within buffer zone – neutral (e.g. batteries supplying most power)
+                    if currentStatus != 'neutral':
+                        if self.debugLevel >= 2:
+                            self.logger.debug(u'**CHANGED**: Neutral (within buffer)')
+                        dev.updateStateOnServer('powerStatus', value='neutral', uiValue='Neutral')
+                        dev.updateStateOnServer('generatingPower', value=True)
+                        dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
 
-                    dev.updateStateOnServer('powerStatus', value = 'exporting', uiValue='Exporting Power')
-                    dev.updateStateOnServer('generatingPower', value=True)
-                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
-                    if self.debugLevel >= 2:
-                        self.logger.debug("State Image Selector:" + str(dev.displayStateImageSel))
 
-                if productionWatts < consumptionWatts and (dev.states['powerStatus'] == 'exporting' or dev.states['powerStatus']=='offline'):
-                    #Must be opposite or and again a change only
-                    if self.debugLevel >= 2:
-                        self.logger.debug(u'**CHANGED**: Importing power')
-                    dev.updateStateOnServer('powerStatus', value='importing', uiValue='Importing Power')
-                    dev.updateStateOnServer('generatingPower', value=False)
-                    dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOff)
-                    if self.debugLevel >= 2:
-                        self.logger.debug(u"State Image Selector:" + str(dev.displayStateImageSel))
             elif envoyType == "Unmetered":
             # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
             # not consumption data appears possible
@@ -3669,6 +3698,17 @@ class Plugin(indigo.PluginBase):
             # netConsumption: positive = importing from grid, negative = exporting to grid
             gridImport = max(0, netConsumption)
             gridExport = max(0, -netConsumption)
+
+            if netConsumption > POWER_STATUS_BUFFER:
+                gridImport = netConsumption
+                gridExport = 0
+            elif netConsumption < -POWER_STATUS_BUFFER:
+                gridImport = 0
+                gridExport = -netConsumption
+            else:
+                gridImport = 0
+                gridExport = 0
+
             battDev.updateStateOnServer('gridImportWatts', value=gridImport)
             battDev.updateStateOnServer('gridExportWatts', value=gridExport)
             battDev.updateStateOnServer('gridNetWatts', value=netConsumption)
@@ -3749,6 +3789,8 @@ class Plugin(indigo.PluginBase):
                     battDev.updateStateOnServer('gridStatus', value='Exporting')
                 elif powerStatus == 'importing':
                     battDev.updateStateOnServer('gridStatus', value='Importing')
+                elif powerStatus == 'neutral':
+                    battDev.updateStateOnServer('gridStatus', value='Neutral')
                 elif powerStatus == 'offline':
                     battDev.updateStateOnServer('gridStatus', value='Offline')
                 else:
