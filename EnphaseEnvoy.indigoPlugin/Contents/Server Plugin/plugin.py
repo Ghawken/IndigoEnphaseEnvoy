@@ -1414,6 +1414,8 @@ class Plugin(indigo.PluginBase):
                     except Exception:
                         self.logger.exception(f"Freshness check failed for {dev.name}")
 
+                self._log_panels_last_heard()
+
                 # Sleep in 1-s increments so we can respond to stop quickly
                 for _ in range(INTERVAL):
                     if self._freshness_stop.is_set():
@@ -1548,19 +1550,16 @@ class Plugin(indigo.PluginBase):
             f"tie={winner_tally['tie']}"
         )
 
-        # Log all panels' lastHeard in a comma-separated list
-        last_heard_parts = []
-        for paneldev in indigo.devices.iter('self.EnphasePanelDevice'):
-            sn = str(paneldev.states.get('serialNo', ''))
-            heard = paneldev.states.get('lastHeard', '')
-            if sn and heard:
-                last_heard_parts.append(f"{sn}:{heard}")
-            elif sn:
-                last_heard_parts.append(f"{sn}:N/A")
-        if last_heard_parts:
-            self.logger.info(f"[{dev.name}]   All panels lastHeard: {', '.join(last_heard_parts)}")
-
         self.logger.info(f"[{dev.name}] ── End Freshness Check ──")
+
+    def _log_panels_last_heard(self):
+        """Log every panel device's lastHeard value as a comma-separated list."""
+        parts = []
+        for paneldev in indigo.devices.iter('self.EnphasePanelDevice'):
+            heard = paneldev.states.get('lastHeard', '')
+            parts.append(heard if heard else 'N/A')
+        if parts:
+            self.logger.info(f"All panels lastHeard: {', '.join(parts)}")
 
 
     def checkDayTime(self, device):
