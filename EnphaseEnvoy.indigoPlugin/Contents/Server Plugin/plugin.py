@@ -1547,6 +1547,19 @@ class Plugin(indigo.PluginBase):
             f"devstatus={winner_tally['devstatus']}  "
             f"tie={winner_tally['tie']}"
         )
+
+        # Log all panels' lastHeard in a comma-separated list
+        last_heard_parts = []
+        for paneldev in indigo.devices.iter('self.EnphasePanelDevice'):
+            sn = str(paneldev.states.get('serialNo', ''))
+            heard = paneldev.states.get('lastHeard', '')
+            if sn and heard:
+                last_heard_parts.append(f"{sn}:{heard}")
+            elif sn:
+                last_heard_parts.append(f"{sn}:N/A")
+        if last_heard_parts:
+            self.logger.info(f"[{dev.name}]   All panels lastHeard: {', '.join(last_heard_parts)}")
+
         self.logger.info(f"[{dev.name}] ── End Freshness Check ──")
 
 
