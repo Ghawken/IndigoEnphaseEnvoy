@@ -94,30 +94,7 @@ def format_elapsed_time(seconds):
         return f"{hours}hr {remaining_mins:.2f}mins"
 
 
-def _parse_elapsed_minutes(text):
-    """Parse a ``format_elapsed_time`` string back to total minutes.
-
-    Handles "22 s", "12.21 mins", and "1hr 12.21mins".
-    Returns *None* if the string cannot be parsed.
-    """
-    if not text:
-        return None
-    text = text.strip()
-    try:
-        if text.endswith(' s'):
-            return float(text.replace(' s', '')) / 60.0
-        if 'hr' in text:
-            parts = text.split('hr')
-            hours = float(parts[0].strip())
-            mins_part = parts[1].strip().replace('mins', '')
-            return hours * 60 + float(mins_part)
-        if 'mins' in text:
-            return float(text.replace(' mins', '').replace('mins', ''))
-    except (ValueError, IndexError):
-        pass
-    return None
-
-
+class IndigoLogHandler(logging.Handler):
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
 
@@ -1584,20 +1561,29 @@ class Plugin(indigo.PluginBase):
         if not panels:
             return
         self.logger.info(f"── All Panels Last Heard ({len(panels)} panels) ──")
+        now = datetime.datetime.now()
         for paneldev in panels:
             heard = paneldev.states.get('lastHeard', '')
             name = paneldev.name[:25].ljust(25)
+            # Determine emoji from lastCommunication timestamp
+            last_comm = paneldev.states.get('lastCommunication', '')
+            emoji = ""
+            if last_comm:
+                try:
+                    comm_dt = datetime.datetime.strptime(last_comm, '%c')
+                    elapsed_mins = (now - comm_dt).total_seconds() / 60.0
+                    if elapsed_mins < 10:
+                        emoji = "👍"
+                    elif elapsed_mins <= 15:
+                        emoji = "👌"
+                    else:
+                        emoji = "👎"
+                except (ValueError, TypeError):
+                    emoji = ""
             if heard:
-                mins = _parse_elapsed_minutes(heard)
-                if mins is not None and mins < 10:
-                    emoji = "👍"
-                elif mins is not None and mins <= 15:
-                    emoji = "👌"
-                else:
-                    emoji = "👎"
                 self.logger.info(f"  {name} {emoji} {heard} ago")
             else:
-                self.logger.info(f"  {name} N/A")
+                self.logger.info(f"  {name} {emoji} N/A")
         self.logger.info(f"── End All Panels Last Heard ──")
 
 
