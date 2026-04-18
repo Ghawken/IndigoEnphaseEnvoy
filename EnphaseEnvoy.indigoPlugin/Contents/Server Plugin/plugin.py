@@ -76,6 +76,22 @@ PANEL_STALE_THRESHOLD_SECS = 25 * 60  # 15 minutes
 POWER_STATUS_BUFFER = 100
 
 
+def format_elapsed_time(seconds):
+    """Format elapsed seconds into a human-readable string.
+    Returns e.g. "22 s", "12.21 mins", "1hr 12.21mins".
+    """
+    if seconds < 0:
+        seconds = 0
+    if seconds < 60:
+        return f"{int(seconds)} s"
+    elif seconds < 3600:
+        mins = seconds / 60.0
+        return f"{mins:.2f} mins"
+    else:
+        hours = int(seconds // 3600)
+        remaining_mins = (seconds % 3600) / 60.0
+        return f"{hours}hr {remaining_mins:.2f}mins"
+
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
 
@@ -1393,6 +1409,7 @@ class Plugin(indigo.PluginBase):
                         continue
                     try:
                         self._compare_panel_freshness(dev)
+
                     except Exception:
                         self.logger.exception(f"Freshness check failed for {dev.name}")
 
@@ -1529,7 +1546,57 @@ class Plugin(indigo.PluginBase):
             f"devstatus={winner_tally['devstatus']}  "
             f"tie={winner_tally['tie']}"
         )
+        last_heard_parts = []
+
         self.logger.info(f"[{dev.name}] ── End Freshness Check ──")
+
+    def logPanelsLastHeard(self):
+        """Menu callback – log every panel's lastHeard value."""
+        self._log_panels_last_heard()
+
+
+    def _log_panels_last_heard(self):
+        """Log every panel device's lastHeard value, sorted most-recent first."""
+        panels = list(indigo.devices.iter('self.EnphasePanelDevice'))
+        if not panels:
+            return
+        self.logger.info(f"── All Panels Last Heard ({len(panels)} panels) ──")
+        now = datetime.datetime.now()
+
+        # Build a list of (elapsed_mins, paneldev) for sorting
+        panel_rows = []
+        for paneldev in panels:
+            last_comm = paneldev.states.get('lastCommunication', '')
+            elapsed_mins = None
+            if last_comm:
+                try:
+                    comm_dt = datetime.datetime.strptime(last_comm, '%c')
+                    elapsed_mins = (now - comm_dt).total_seconds() / 60.0
+                except (ValueError, TypeError):
+                    pass
+            panel_rows.append((elapsed_mins, paneldev))
+
+        # Sort: most recent first; panels without a timestamp go last
+        panel_rows.sort(key=lambda r: r[0] if r[0] is not None else float('inf'))
+
+        for elapsed_mins, paneldev in panel_rows:
+            heard = paneldev.states.get('lastHeard', '')
+            name = paneldev.name[:25].ljust(25)
+            if elapsed_mins is not None:
+                if elapsed_mins < 10:
+                    emoji = "👍"
+                elif elapsed_mins <= 15:
+                    emoji = "👌"
+                else:
+                    emoji = "👎"
+            else:
+                emoji = ""
+            if heard:
+                self.logger.info(f"  {name} {emoji} {heard} ago")
+            else:
+                self.logger.info(f"  {name} {emoji} N/A")
+        self.logger.info(f"── End All Panels Last Heard ──")
+
 
 
     def checkDayTime(self, device):
@@ -2154,6 +2221,8 @@ class Plugin(indigo.PluginBase):
                                     # Preserve the last known communication time
                                     if report_ts > 0:
                                         paneldev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
+                                        elapsed = now_epoch - report_ts
+                                        paneldev.updateStateOnServer('lastHeard', value=format_elapsed_time(elapsed))
                                     if self.debugLevel >= 1:
                                         age_mins = round((now_epoch - report_ts) / 60, 1) if report_ts > 0 else "N/A"
                                         self.logger.debug(
@@ -2171,6 +2240,8 @@ class Plugin(indigo.PluginBase):
                                 # Keeping the previous value preserves the real last-seen time.
                                 if report_ts > 0:
                                     paneldev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
+                                    elapsed = now_epoch - report_ts
+                                    paneldev.updateStateOnServer('lastHeard', value=format_elapsed_time(elapsed))
                                 paneldev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
                                 paneldev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                 paneldev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
@@ -3397,6 +3468,9 @@ class Plugin(indigo.PluginBase):
                             {'key': 'serialNo', 'value': float(array['serialNumber'])},
                             {'key': 'watts', 'value': int(array['lastReportWatts']) },
                             {'key': 'lastCommunication', 'value': str(datetime.datetime.fromtimestamp(int(array['lastReportDate'])).strftime('%c'))},
+                            {'key': 'lastHeard',
+                             'value': format_elapsed_time(int(t.time()) - int(array['lastReportDate'])) if int(
+                                 array.get('lastReportDate', 0)) > 0 else ''},
                             {'key': 'maxWatts', 'value': 0},
                             {'key': 'deviceLastUpdated', 'value': update_time },
                             {'key': 'deviceIsOnline', 'value': True},
