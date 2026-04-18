@@ -514,6 +514,8 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('productionWattsNow', value=0)
             dev.updateStateOnServer('consumptionWattsNow', value=0)
             dev.updateStateOnServer('netConsumptionWattsNow', value=0)
+            dev.updateStateOnServer('grid_usage', value=0)
+            dev.updateStateOnServer('grid_in_use', value=False)
             dev.updateStateOnServer('production7days', value=0)
             dev.updateStateOnServer('consumption7days', value=0)
             dev.updateStateOnServer('consumptionWattsToday', value=0)
@@ -3121,7 +3123,8 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('consumptionwhLifetime',  value=int(data['consumption'][0]['whLifetime']))
                     dev.updateStateOnServer('consumptionWattsToday', value=int(data['consumption'][0]['whToday']))
                     if len(data['consumption'])>1:
-                        dev.updateStateOnServer('netConsumptionWattsNow', value=int(data['consumption'][1]['wNow']))
+                        netConsumption = int(data['consumption'][1]['wNow'])
+                        dev.updateStateOnServer('netConsumptionWattsNow', value=netConsumption)
                         dev.updateStateOnServer('netconsumptionwhLifetime',value=int(data['consumption'][1]['whLifetime']))
                     else:
                         if self.debugLevel >=2:
@@ -3130,6 +3133,11 @@ class Plugin(indigo.PluginBase):
                         #
                         netConsumption = int(consumptionWatts) - int(productionWatts)
                         dev.updateStateOnServer('netConsumptionWattsNow', value=int(netConsumption))
+
+                    # grid_usage: positive = pulling from grid, negative = sending to grid
+                    # grid_in_use: true when grid flow exceeds buffer threshold
+                    dev.updateStateOnServer('grid_usage', value=netConsumption)
+                    dev.updateStateOnServer('grid_in_use', value=(abs(netConsumption) > POWER_STATUS_BUFFER))
             elif envoyType == "Unmetered":
                     # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
                     # not consumption data appears possible
@@ -3138,6 +3146,8 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('consumptionWattsToday', value=int(0),uiValue="Not Reported")
                     dev.updateStateOnServer('consumptionwhLifetime', value=int(0),uiValue="Not Reported")
                     dev.updateStateOnServer('netConsumptionWattsNow', value=int(0),uiValue="Not Reported")
+                    dev.updateStateOnServer('grid_usage', value=0, uiValue="Not Reported")
+                    dev.updateStateOnServer('grid_in_use', value=False)
 
                     # if consumptionData is not None:
                     #     if 'wattsNow' in consumptionData:
