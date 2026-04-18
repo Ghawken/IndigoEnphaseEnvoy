@@ -1553,13 +1553,15 @@ class Plugin(indigo.PluginBase):
         self.logger.info(f"[{dev.name}] ── End Freshness Check ──")
 
     def _log_panels_last_heard(self):
-        """Log every panel device's lastHeard value as a comma-separated list."""
-        parts = []
-        for paneldev in indigo.devices.iter('self.EnphasePanelDevice'):
+        """Log every panel device's lastHeard value, one per line."""
+        panels = list(indigo.devices.iter('self.EnphasePanelDevice'))
+        if not panels:
+            return
+        self.logger.info(f"── All Panels Last Heard ({len(panels)} panels) ──")
+        for paneldev in panels:
             heard = paneldev.states.get('lastHeard', '')
-            parts.append(heard if heard else 'N/A')
-        if parts:
-            self.logger.info(f"All panels lastHeard: {', '.join(parts)}")
+            self.logger.info(f"  {paneldev.name}: {heard if heard else 'N/A'}")
+        self.logger.info(f"── End All Panels Last Heard ──")
 
 
     def checkDayTime(self, device):
