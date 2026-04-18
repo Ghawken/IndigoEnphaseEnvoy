@@ -227,7 +227,11 @@
         <TriggerLabel>Grid In Use</TriggerLabel>
         <ControlPageLabel>Grid In Use</ControlPageLabel>
       </State>
-
+      <State id="grid_text">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Grid Status Text</TriggerLabel>
+        <ControlPageLabel>Grid Status Text</ControlPageLabel>
+      </State>
      <State id="production7days">
         <ValueType>Number</ValueType>
         <TriggerLabel>Power Production 7 days(watts)</TriggerLabel>
