@@ -1562,7 +1562,8 @@ class Plugin(indigo.PluginBase):
         self.logger.info(f"── All Panels Last Heard ({len(panels)} panels) ──")
         for paneldev in panels:
             heard = paneldev.states.get('lastHeard', '')
-            self.logger.info(f"  {paneldev.name}\t{heard + ' okay' if heard else 'N/A'}")
+            name = paneldev.name[:25] if len(paneldev.name) > 25 else paneldev.name
+            self.logger.info(f"  {name:<25s} {heard + ' ago' if heard else 'N/A'}")
         self.logger.info(f"── End All Panels Last Heard ──")
 
 
