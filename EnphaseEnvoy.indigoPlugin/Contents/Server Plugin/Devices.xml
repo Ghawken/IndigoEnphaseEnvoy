@@ -633,6 +633,11 @@
         <TriggerLabel>Date/Time Last Communication from Panel</TriggerLabel>
         <ControlPageLabel>Date/time Last Communication from Panel</ControlPageLabel>
       </State>
+      <State id="lastHeard">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Time Since Envoy Last Heard from Microinverter</TriggerLabel>
+        <ControlPageLabel>Time Since Last Heard</ControlPageLabel>
+      </State>
      <State id="acFrequency">
         <ValueType>Number</ValueType>
         <TriggerLabel>AC Frequency (Hz)</TriggerLabel>

@@ -76,6 +76,24 @@ PANEL_STALE_THRESHOLD_SECS = 25 * 60  # 15 minutes
 POWER_STATUS_BUFFER = 100
 
 
+def format_elapsed_time(seconds):
+    """Format elapsed seconds into a human-readable string.
+
+    Returns e.g. "22 s", "12.21 mins", "1hr 12.21mins".
+    """
+    if seconds < 0:
+        seconds = 0
+    if seconds < 60:
+        return f"{int(seconds)} s"
+    elif seconds < 3600:
+        mins = seconds / 60.0
+        return f"{mins:.2f} mins"
+    else:
+        hours = int(seconds // 3600)
+        remaining_mins = (seconds % 3600) / 60.0
+        return f"{hours}hr {remaining_mins:.2f}mins"
+
+
 class IndigoLogHandler(logging.Handler):
     def __init__(self, display_name: str, level=logging.NOTSET, force_debug: bool = False):
 
@@ -2154,6 +2172,8 @@ class Plugin(indigo.PluginBase):
                                     # Preserve the last known communication time
                                     if report_ts > 0:
                                         paneldev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
+                                        elapsed = now_epoch - report_ts
+                                        paneldev.updateStateOnServer('lastHeard', value=format_elapsed_time(elapsed))
                                     if self.debugLevel >= 1:
                                         age_mins = round((now_epoch - report_ts) / 60, 1) if report_ts > 0 else "N/A"
                                         self.logger.debug(
@@ -2171,6 +2191,8 @@ class Plugin(indigo.PluginBase):
                                 # Keeping the previous value preserves the real last-seen time.
                                 if report_ts > 0:
                                     paneldev.updateStateOnServer('lastCommunication', value=str(datetime.datetime.fromtimestamp(report_ts).strftime('%c')))
+                                    elapsed = now_epoch - report_ts
+                                    paneldev.updateStateOnServer('lastHeard', value=format_elapsed_time(elapsed))
                                 paneldev.updateStateOnServer('maxWatts', value=int(panel['maxReportWatts']))
                                 paneldev.updateStateOnServer('deviceLastUpdated', value=update_time)
                                 paneldev.updateStateOnServer('deviceIsOnline', value=True, uiValue="Online")
@@ -3397,6 +3419,7 @@ class Plugin(indigo.PluginBase):
                             {'key': 'serialNo', 'value': float(array['serialNumber'])},
                             {'key': 'watts', 'value': int(array['lastReportWatts']) },
                             {'key': 'lastCommunication', 'value': str(datetime.datetime.fromtimestamp(int(array['lastReportDate'])).strftime('%c'))},
+                            {'key': 'lastHeard', 'value': format_elapsed_time(int(t.time()) - int(array['lastReportDate'])) if int(array.get('lastReportDate', 0)) > 0 else ''},
                             {'key': 'maxWatts', 'value': 0},
                             {'key': 'deviceLastUpdated', 'value': update_time },
                             {'key': 'deviceIsOnline', 'value': True},
