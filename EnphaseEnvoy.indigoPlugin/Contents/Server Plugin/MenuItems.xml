@@ -9,6 +9,11 @@
     <CallbackMethod>stopFreshnessCheck</CallbackMethod>
   </MenuItem>
 
+  <MenuItem id="logPanelsLastHeard">
+    <Name>Log All Panels Last Heard</Name>
+    <CallbackMethod>logPanelsLastHeard</CallbackMethod>
+  </MenuItem>
+
   <MenuItem id="toggleDebug">
     <Name>Toggle Debugging</Name>
     <CallbackMethod>toggleDebugEnabled</CallbackMethod>

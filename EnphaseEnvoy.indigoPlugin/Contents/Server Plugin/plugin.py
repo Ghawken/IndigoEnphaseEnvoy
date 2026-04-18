@@ -1383,6 +1383,10 @@ class Plugin(indigo.PluginBase):
         self._freshness_stop.set()
         self.logger.info("Panel freshness check stop requested – will finish current cycle and exit.")
 
+    def logPanelsLastHeard(self):
+        """Menu callback – log every panel's lastHeard value."""
+        self._log_panels_last_heard()
+
     # ── background thread entry point ────────────────────────────
     def _freshness_thread_loop(self):
         """Runs _compare_panel_freshness every 60 s for up to 15 min."""
@@ -1413,8 +1417,6 @@ class Plugin(indigo.PluginBase):
                         self._compare_panel_freshness(dev)
                     except Exception:
                         self.logger.exception(f"Freshness check failed for {dev.name}")
-
-                self._log_panels_last_heard()
 
                 # Sleep in 1-s increments so we can respond to stop quickly
                 for _ in range(INTERVAL):
