@@ -516,6 +516,7 @@ class Plugin(indigo.PluginBase):
             dev.updateStateOnServer('netConsumptionWattsNow', value=0)
             dev.updateStateOnServer('grid_usage', value=0)
             dev.updateStateOnServer('grid_in_use', value=False)
+            dev.updateStateOnServer('grid_text', value="Offline")
             dev.updateStateOnServer('production7days', value=0)
             dev.updateStateOnServer('consumption7days', value=0)
             dev.updateStateOnServer('consumptionWattsToday', value=0)
@@ -3138,6 +3139,15 @@ class Plugin(indigo.PluginBase):
                     # grid_in_use: true only when importing from the grid (positive net consumption above buffer)
                     dev.updateStateOnServer('grid_usage', value=netConsumption)
                     dev.updateStateOnServer('grid_in_use', value=(netConsumption > POWER_STATUS_BUFFER))
+
+                    # grid_text: human-readable summary of grid activity
+                    if netConsumption > POWER_STATUS_BUFFER:
+                        gridText = "Importing {} Watts".format(netConsumption)
+                    elif netConsumption < -POWER_STATUS_BUFFER:
+                        gridText = "Exporting {} Watts".format(-netConsumption)
+                    else:
+                        gridText = "Neutral"
+                    dev.updateStateOnServer('grid_text', value=gridText)
             elif envoyType == "Unmetered":
                     # does seem reported, use the api/consumption endpoint which may or may not exisit on U versions
                     # not consumption data appears possible
@@ -3148,6 +3158,7 @@ class Plugin(indigo.PluginBase):
                     dev.updateStateOnServer('netConsumptionWattsNow', value=int(0),uiValue="Not Reported")
                     dev.updateStateOnServer('grid_usage', value=0, uiValue="Not Reported")
                     dev.updateStateOnServer('grid_in_use', value=False, uiValue="Not Reported")
+                    dev.updateStateOnServer('grid_text', value="Not Reported")
 
                     # if consumptionData is not None:
                     #     if 'wattsNow' in consumptionData:
