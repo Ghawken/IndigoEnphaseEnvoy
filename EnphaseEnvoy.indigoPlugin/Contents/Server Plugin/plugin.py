@@ -1556,30 +1556,41 @@ class Plugin(indigo.PluginBase):
         self.logger.info(f"[{dev.name}] ── End Freshness Check ──")
 
     def _log_panels_last_heard(self):
-        """Log every panel device's lastHeard value, one per line."""
+        """Log every panel device's lastHeard value, sorted most-recent first."""
         panels = list(indigo.devices.iter('self.EnphasePanelDevice'))
         if not panels:
             return
         self.logger.info(f"── All Panels Last Heard ({len(panels)} panels) ──")
         now = datetime.datetime.now()
+
+        # Build a list of (elapsed_mins, paneldev) for sorting
+        panel_rows = []
         for paneldev in panels:
-            heard = paneldev.states.get('lastHeard', '')
-            name = paneldev.name[:25].ljust(25)
-            # Determine emoji from lastCommunication timestamp
             last_comm = paneldev.states.get('lastCommunication', '')
-            emoji = ""
+            elapsed_mins = None
             if last_comm:
                 try:
                     comm_dt = datetime.datetime.strptime(last_comm, '%c')
                     elapsed_mins = (now - comm_dt).total_seconds() / 60.0
-                    if elapsed_mins < 10:
-                        emoji = "👍"
-                    elif elapsed_mins <= 15:
-                        emoji = "👌"
-                    else:
-                        emoji = "👎"
                 except (ValueError, TypeError):
-                    emoji = ""
+                    pass
+            panel_rows.append((elapsed_mins, paneldev))
+
+        # Sort: most recent first; panels without a timestamp go last
+        panel_rows.sort(key=lambda r: r[0] if r[0] is not None else float('inf'))
+
+        for elapsed_mins, paneldev in panel_rows:
+            heard = paneldev.states.get('lastHeard', '')
+            name = paneldev.name[:25].ljust(25)
+            if elapsed_mins is not None:
+                if elapsed_mins < 10:
+                    emoji = "👍"
+                elif elapsed_mins <= 15:
+                    emoji = "👌"
+                else:
+                    emoji = "👎"
+            else:
+                emoji = ""
             if heard:
                 self.logger.info(f"  {name} {emoji} {heard} ago")
             else:
