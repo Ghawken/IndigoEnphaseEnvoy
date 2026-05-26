@@ -1,6 +1,6 @@
 # Enphase Envoy — Indigo Plugin Wiki
 
-![Enphase Envoy Indigo Plugin](../Images/banner.png)
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
 
 > **Monitor. Measure. Optimise.**  
 > Connect locally to your Enphase Envoy-S and monitor solar production, home consumption, net import/export, and individual panel output in Indigo.

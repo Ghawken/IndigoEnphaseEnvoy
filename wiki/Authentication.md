@@ -1,5 +1,7 @@
 # Authentication
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 Enphase changed the Envoy's local API authentication model in firmware **7.x**. Older hardware uses HTTP Digest auth; newer hardware requires a JWT Bearer token.
 
 ---

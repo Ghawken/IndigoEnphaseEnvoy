@@ -1,5 +1,7 @@
 # Troubleshooting
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 ---
 
 ## Device Won't Come Online

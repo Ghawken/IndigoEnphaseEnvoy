@@ -1,5 +1,7 @@
 # Device States Reference
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 ---
 
 ## EnphaseEnvoyDevice States

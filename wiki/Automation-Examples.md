@@ -1,5 +1,7 @@
 # Automation Examples
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 Practical Indigo trigger/condition/action group recipes using the Enphase Envoy plugin.
 
 ---

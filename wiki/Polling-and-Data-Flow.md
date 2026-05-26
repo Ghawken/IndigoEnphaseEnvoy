@@ -1,5 +1,7 @@
 # Polling & Data Flow
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 Understanding how the plugin fetches data helps you set appropriate expectations and build reliable automations.
 
 ---

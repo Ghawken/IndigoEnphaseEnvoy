@@ -1,5 +1,7 @@
 # Actions Reference
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 All plugin actions appear under **Actions → Enphase Envoy** in Indigo's action group editor.
 
 ---

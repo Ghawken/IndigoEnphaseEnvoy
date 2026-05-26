@@ -1,5 +1,7 @@
 # Device Types
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 The plugin provides five device types. Each is independent — you can create only the ones you need.
 
 ---

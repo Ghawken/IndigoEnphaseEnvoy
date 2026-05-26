@@ -1,5 +1,7 @@
 # Plugin Menu & Diagnostics
 
+![Enphase Envoy Indigo Plugin](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png)
+
 Access the plugin menu from **Plugins → Enphase Envoy → …** in Indigo.
 
 ---
