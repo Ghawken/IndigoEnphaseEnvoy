@@ -1,0 +1,114 @@
+[img]https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/banner.png[/img]
+
+[size=150][b]Enphase Envoy Plugin for Indigo Domotics[/b][/size]
+
+Monitor your Enphase solar system — production, consumption, battery, and individual panel output — directly from [url=https://www.indigodomo.com/]Indigo Domotics[/url] via your local Envoy gateway. No cloud dependency; data updates every 60 seconds.
+
+[url=https://github.com/Ghawken/IndigoEnphaseEnvoy/releases/latest]Latest Release[/url] | [url=http://www.indigodomo.com/pluginstore/105/]Indigo Plugin Store[/url] | [url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki]Full Wiki Documentation[/url]
+
+[size=120][b]Features[/b][/size]
+
+[list]
+[*][b]Real-time solar monitoring[/b] — production, consumption, net flow, and grid status updated every 60 seconds direct from the local Envoy
+[*][b]Per-panel microinverter devices[/b] — one Indigo device per panel, showing watts, temperature, DC/AC voltage, energy totals, and last-heard time
+[*][b]Battery & grid support[/b] — full Encharge battery state, charge/discharge rate, state of charge, storage mode, and grid import/export
+[*][b]Cost tracking[/b] — optional Cost device calculates daily, 7-day, and lifetime energy costs against your configured tariff rates
+[*][b]Power production control[/b] — enable or disable all inverter output via an Indigo action (installer token required)
+[*][b]DPEL — Dynamic Power Export Limiting[/b] — cap grid export or total production at a configurable watt limit and slew rate
+[*][b]Battery storage mode control[/b] — switch between Self-Consumption, Savings (TOU), and Full Backup; enable/disable grid charging; set reserve SOC
+[*][b]Firmware ≥7 JWT authentication[/b] — auto-generates and refreshes installer or owner tokens; supports manual token entry
+[*][b]Multi-Envoy[/b] — run multiple Envoy devices simultaneously for homes with more than one gateway
+[*][b]No external dependencies[/b] — all required packages are bundled inside the plugin; no manual pip installs needed
+[/list]
+
+[size=120][b]Screenshots[/b][/size]
+
+Live device states — Envoy-S Metered, 50 panels, firmware D8.3.5232:
+[img]https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/EnvoySStates.png[/img]
+
+Device settings dialog:
+[img]https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/EnvoyDeviceSettings.png[/img]
+
+[size=120][b]Quick Start[/b][/size]
+
+[list=1]
+[*][b]Download[/b] the latest [url=https://github.com/Ghawken/IndigoEnphaseEnvoy/releases/latest].indigoPlugin from GitHub Releases[/url] or from the [url=http://www.indigodomo.com/pluginstore/105/]Indigo Plugin Store[/url].
+[*][b]Double-click[/b] the downloaded file — Indigo will prompt to install and enable it.
+[*][b]Create a device[/b] — go to [i]Devices → New Device…[/i], select model [b]Enphase Envoy-S[/b], and enter your Envoy's local IP address.
+[*][b]Add a token[/b] (firmware ≥7 only) — use [b]Generate Token[/b] with your Enphase Enlighten credentials, or paste a manual token from [url=https://entrez.enphaseenergy.com/]entrez.enphaseenergy.com[/url].
+[*][b]Save[/b] — the plugin polls immediately; within 30 seconds [i]deviceIsOnline[/i] will be True and live data will appear.
+[/list]
+
+Full step-by-step instructions: [url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Installation-and-Setup]Installation & Setup wiki page[/url]
+
+[size=120][b]Documentation[/b][/size]
+
+All documentation is in the [url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki]GitHub Wiki[/url]:
+
+[list]
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Home]Home[/url] — Overview, architecture, what's new
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Installation-and-Setup]Installation & Setup[/url] — Prerequisites, install steps, device creation, startup log guide
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Authentication]Authentication[/url] — Token types, auto-generate vs manual, MFA handling, token refresh
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Device-Types]Device Types[/url] — All 5 device models and their configuration options
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Device-States-Reference]Device States Reference[/url] — Every state across all device types, with types and descriptions
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Actions-Reference]Actions Reference[/url] — All plugin actions: DPEL, power control, battery modes
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Plugin-Menu-and-Diagnostics]Plugin Menu & Diagnostics[/url] — Menu items, endpoint checker, log panel freshness
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Polling-and-Data-Flow]Polling & Data Flow[/url] — Cadence table, panel pipeline, HTTP session reuse, back-off logic
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Automation-Examples]Automation Examples[/url] — 14 ready-to-use automation recipes
+[*][url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Troubleshooting]Troubleshooting[/url] — Common problems, authentication errors, error reference
+[/list]
+
+[size=120][b]Supported Device Types[/b][/size]
+
+[list]
+[*][b]Enphase Envoy-S[/b] — Main gateway: production, consumption, storage, per-phase metering
+[*][b]Enphase Legacy[/b] — Older Envoy-C hardware without metering support
+[*][b]Enphase Panel[/b] — One device per microinverter: watts, temperature, DC/AC voltage, energy totals
+[*][b]Enphase Battery & Grid[/b] — Encharge battery state, grid flow, storage mode settings
+[*][b]Enphase Cost[/b] — Calculates energy costs against your tariff rates
+[/list]
+
+[size=120][b]What's New — v1.8.0[/b][/size]
+
+[list]
+[*][b]Menu item: Log Last Time Envoy Heard from Panels[/b] — highlights panels that have gone silent and shows reporting delay
+[*]New states: [i]panelLastUpdated[/i], [i]panelLastUpdatedUTC[/i], [i]panelDataSource[/i]
+[*]New state: [i]grid_text[/i] — human-readable summary e.g. [i]"Grid in use & Importing 450 Watts"[/i]
+[*]New states: [i]grid_in_use[/i] (Boolean) and [i]grid_usage[/i] (signed watts)
+[*][i]powerStatus[/i] neutral band — flows under 100 W classified as [i]neutral[/i] rather than importing/exporting
+[*]Bug fix: voltage states were not divided by phase count on multi-phase systems
+[/list]
+
+Full changelog: [url=https://github.com/Ghawken/IndigoEnphaseEnvoy/releases]GitHub Releases[/url]
+
+[size=120][b]Requirements[/b][/size]
+
+[list]
+[*][b]Indigo Domotics[/b] 2025.1+
+[*][b]Python[/b] 3.10+ (bundled with modern Indigo)
+[*][b]Network[/b] — Indigo Mac and Envoy must be on the same LAN
+[*][b]Enphase account[/b] — required only for firmware ≥7 token generation
+[/list]
+
+[size=120][b]Actions at a Glance[/b][/size]
+
+[list]
+[*]Refresh all devices / Refresh single device — [i]any token[/i]
+[*]Enable / Disable power production — [b]installer token required[/b]
+[*]Enable / Disable DPEL (export limiting) — [b]installer token required[/b]
+[*]Set storage mode (self-consumption / savings / backup) — installer token recommended
+[*]Enable / Disable charge from grid — installer token recommended
+[*]Set battery reserve SOC — installer token recommended
+[/list]
+
+Full parameter details and workflow examples: [url=https://github.com/Ghawken/IndigoEnphaseEnvoy/wiki/Actions-Reference]Actions Reference[/url]
+
+[size=120][b]Support & Community[/b][/size]
+
+[list]
+[*][b]Indigo Plugin Forum:[/b] [url=https://forums.indigodomo.com/viewforum.php?f=65]forums.indigodomo.com[/url]
+[*][b]Bug reports & feature requests:[/b] [url=https://github.com/Ghawken/IndigoEnphaseEnvoy/issues]GitHub Issues[/url]
+[*][b]Plugin Store:[/b] [url=http://www.indigodomo.com/pluginstore/105/]indigodomo.com/pluginstore/105[/url]
+[/list]
+
+[img]https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png[/img]

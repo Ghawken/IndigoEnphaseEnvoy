@@ -5,7 +5,7 @@
 Monitor your Enphase solar system — production, consumption, battery, and individual panel output — directly from [Indigo Domotics](https://www.indigodomo.com/) via your local Envoy gateway. No cloud dependency; data updates every 60 seconds.
 
 [![Latest Release](https://img.shields.io/github/v/release/Ghawken/IndigoEnphaseEnvoy)](https://github.com/Ghawken/IndigoEnphaseEnvoy/releases/latest)
-[![Indigo](https://img.shields.io/badge/Indigo-2022.1%2B-blue)](https://www.indigodomo.com/)
+[![Indigo](https://img.shields.io/badge/Indigo-2025.1%2B-blue)](https://www.indigodomo.com/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -98,7 +98,7 @@ Full changelog in [GitHub Releases](https://github.com/Ghawken/IndigoEnphaseEnvo
 
 | Requirement | Minimum |
 |---|---|
-| Indigo Domotics | 2022.1 (2025.x recommended) |
+| Indigo Domotics | 2025.1+ |
 | Python | 3.10+ (bundled with modern Indigo) |
 | Network | Indigo Mac and Envoy on same LAN |
 | Enphase account | Required for firmware ≥7 token generation |
