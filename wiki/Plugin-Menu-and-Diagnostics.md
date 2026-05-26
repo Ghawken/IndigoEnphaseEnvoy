@@ -142,3 +142,7 @@ Checking all panels with devstatus+device_data (43 inverters)
 Error connecting to Device: My Envoy  (HTTP 401 from https://192.168.1.50/production.json)
 Authorization failed enabling DPEL for My Envoy. HTTP 403. This endpoint requires an installer-level JWT token.
 ```
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

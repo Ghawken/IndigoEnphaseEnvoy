@@ -281,3 +281,7 @@ Use device states directly in Indigo Control Pages:
 | Battery state | My Battery | `batteryState` |
 | Today's cost | My Cost | `netTarrifToday` |
 | Last panel update | My Envoy | `panelLastUpdated` |
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

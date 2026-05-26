@@ -148,3 +148,7 @@ All monetary values are formatted as `$x,xxx.xx` strings.
 
 ### Update Timing
 Recalculated automatically every time the parent Envoy device updates states — no separate polling.
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

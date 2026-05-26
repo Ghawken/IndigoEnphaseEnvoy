@@ -143,3 +143,7 @@ Envoy refresh (60 s)
                 ├─ GET /admin/lib/tariff → storageMode, chargeFromGrid, reserveSOC
                 └─ Update all battdev states
 ```
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

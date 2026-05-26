@@ -52,8 +52,10 @@ Open **Plugins → Enphase Envoy → Configure…** to access global settings.
 
 ### Step 2 — Configure the Device
 
+![Enphase Envoy-S device settings dialog](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/EnvoyDeviceSettings.png)
+
 #### IP Address
-Enter the static LAN IP of your Envoy (e.g., `192.168.1.50`).
+Enter the static LAN IP of your Envoy (e.g., `192.168.1.118`).
 
 #### Firmware & Authentication
 See the [Authentication](Authentication) page for which option to choose. For most modern installs (firmware ≥7):
@@ -125,3 +127,56 @@ When you click **Generate Panel Devices**, panels are created in the same folder
 Open the Envoy-S device settings and click **Delete Panel Indigo Devices**. All `EnphasePanelDevice` devices are removed from Indigo.
 
 > Panel devices do **not** need to be deleted when you re-generate them — duplicate serial numbers are automatically skipped.
+
+---
+
+## Startup Log — What to Expect
+
+A healthy startup with two Envoy devices, a Battery device, and a Cost device looks like this in the Indigo event log:
+
+```
+Enphase Envoy Plugin  ======== Initializing New Plugin Session =========
+Enphase Envoy Plugin  Plugin name:     Enphase Envoy Plugin
+Enphase Envoy Plugin  Plugin version:  1.8.0
+Enphase Envoy Plugin  Plugin ID:       com.GlennNZ.indigoplugin.EnphaseEnvoy
+Enphase Envoy Plugin  Indigo version:  2025.2.0
+Enphase Envoy Plugin  Python version:  3.13.9 [Clang 16.0.0]
+Enphase Envoy Plugin  Python Directory:/Library/Frameworks/Python.framework/Versions/3.13
+Enphase Envoy Plugin  ====== End Initializing New Plugin Session =======
+Started plugin "Enphase Envoy Plugin 1.8.0"
+
+Enphase Envoy Plugin  Starting Enphase Battery & Grid device: Battery Device
+Enphase Envoy Plugin  Starting Enphase/Envoy device: Enphase Envoy-S
+Enphase Envoy Plugin  Starting Enphase/Envoy device: Envoy Cost Device
+Enphase Envoy Plugin  Starting Enphase/Envoy device: Envoy S New IQ8HC
+
+Enphase Envoy Plugin  [Enphase Envoy-S] Found Full Enphase Envoy Serial Number: 121639005898
+Enphase Envoy Plugin  [Enphase Envoy-S] Envoy firmware: D8.3.5232
+Enphase Envoy Plugin  [Enphase Envoy-S] Enphase Token Type: ** INSTALLER ** (saved/cached)  —  Expires: Wed May 27 02:22:03 2026
+Enphase Envoy Plugin  [Enphase Envoy-S] Installer token detected — full Envoy API access including power control.
+Enphase Envoy Plugin  [Enphase Envoy-S] Envoy polling interval: 900s
+
+Enphase Envoy Plugin  [Envoy S New IQ8HC] Found Full Enphase Envoy Serial Number: 122412014451
+Enphase Envoy Plugin  [Envoy S New IQ8HC] Envoy firmware: D8.3.5232
+Enphase Envoy Plugin  [Envoy S New IQ8HC] Enphase Token Type: ** INSTALLER ** (saved/cached)  —  Expires: Wed May 27 02:22:22 2026
+Enphase Envoy Plugin  [Envoy S New IQ8HC] Installer token detected — full Envoy API access including power control.
+Enphase Envoy Plugin  [Envoy S New IQ8HC] Envoy polling interval: 900s
+```
+
+### Reading the Startup Log
+
+| Log Line | What It Confirms |
+|----------|-----------------|
+| `Plugin version: 1.8.0` | Correct version installed |
+| `Found Full Enphase Envoy Serial Number: 12xxxxxxxxxx` | Plugin auto-discovered the serial from `/info.xml` — no manual entry needed |
+| `Envoy firmware: D8.3.5232` | Firmware version read from the Envoy |
+| `** INSTALLER ** (saved/cached)` | Installer-level token loaded from a previous session — full API access active |
+| `** OWNER ** (saved/cached)` | Owner token — read-only; power control and DPEL actions will be unavailable |
+| `(newly generated)` | Token was freshly fetched from Enphase cloud this startup |
+| `Envoy polling interval: 900s` | The Envoy's own internal scan cadence (from `/ivp/peb/newscan`); requires installer token |
+
+> **Two Envoys?** The plugin fully supports multiple `EnphaseEnvoyDevice` devices — each gets its own serial number, firmware, and token logged independently at startup.
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

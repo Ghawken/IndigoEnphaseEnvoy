@@ -128,3 +128,7 @@ If you need the local installer password (for old firmware Digest auth), open th
 If your Enlighten account has Multi-Factor Authentication enabled, auto-generated tokens will fail. You must:
 1. Temporarily disable MFA on your Enlighten account, generate a token, then re-enable MFA; **or**
 2. Use a **manual token** obtained from the Entrez portal while MFA is temporarily disabled.
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

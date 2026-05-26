@@ -211,3 +211,7 @@ Tick **Force clear all generated tokens on next startup** in Plugin Config, then
 | `Both PKCE and pyenphase token flows failed` | Credential error or MFA | Check credentials; disable MFA; use manual token |
 | `No storage_settings found in tariff data` | Battery not configured on Envoy | Set up battery in Enphase app first |
 | `No online EnphaseEnvoyDevice found` | Battery action called but Envoy is offline | Ensure Envoy device is online before battery actions |
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

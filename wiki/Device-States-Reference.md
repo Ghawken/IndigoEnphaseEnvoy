@@ -6,6 +6,10 @@
 
 ## EnphaseEnvoyDevice States
 
+The screenshot below shows all states from a live Envoy-S Metered with an installer token, 50 microinverters, and firmware `D8.3.5232`:
+
+![Live Enphase Envoy-S device states in Indigo](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/EnvoySStates.png)
+
 ### Core Status
 
 | State ID | Type | Description |
@@ -13,10 +17,10 @@
 | `deviceIsOnline` | Boolean | True when Envoy is reachable |
 | `deviceLastUpdated` | String | Timestamp of last successful update (e.g. `"05/26/2026 at 14:32"`) |
 | `typeEnvoy` | String | `"Metered"`, `"Unmetered"`, or `"unknown"` |
-| `serial_number` | String | Full Envoy serial number (e.g. `"122011012345"`) |
-| `firmware_version` | String | Envoy firmware (e.g. `"R8.2.4144"`) |
-| `token_expires` | String | JWT token expiry date/time |
-| `envoyPollingInterval` | Number | Envoy's internal scan interval in seconds (installer token only) |
+| `serial_number` | String | Full Envoy serial number (e.g. `"121639005898"`) |
+| `firmware_version` | String | Envoy firmware version (e.g. `"D8.3.5232"`) |
+| `token_expires` | String | JWT token expiry (e.g. `"Wed May 27 02:22:03 2026"`) |
+| `envoyPollingInterval` | Number | Envoy's internal scan interval in seconds — `900` is typical (installer token only) |
 
 ### Power Flow
 
@@ -241,3 +245,7 @@ All monetary values are formatted as `$x,xxx.xx` strings.
 | `productionTarrifLifetime` | String | Lifetime production earnings |
 | `consumptionTarrifLifetime` | String | Lifetime consumption cost |
 | `netconsumptionTarrifLifetime` | String | Lifetime net cost/credit |
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

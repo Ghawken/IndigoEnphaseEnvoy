@@ -73,6 +73,8 @@ Sends `PUT /ivp/mod/603980032/mode/power` with `{"length": 1, "arr": [1]}`, disa
 
 Configures the Envoy's Dynamic Power Export Limiting via `POST /ivp/ss/dpel`.
 
+![Configure Enable DPEL dialog](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/DPEL.png)
+
 #### Action Parameters
 
 | Parameter | Type | Default | Description |
@@ -223,3 +225,7 @@ Trigger: Variable "GridCurtailment" changed to "False"
 Action Group: "Remove Curtailment"
   1. Disable DPEL
 ```
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)

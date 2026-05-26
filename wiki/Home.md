@@ -66,3 +66,7 @@ Indigo Server
         ├─ EnphaseEnvoyBatteryDevice    (battery + grid aggregated view)
         └─ EnphaseEnvoyCostDevice       ($/kWh cost calculations)
 ```
+
+---
+
+![](https://raw.githubusercontent.com/Ghawken/IndigoEnphaseEnvoy/master/Images/pageend.png)
