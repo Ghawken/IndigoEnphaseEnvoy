@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.idea/
+*.iml
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Plugin bundled packages (installed at runtime, not tracked in source)
+EnphaseEnvoy.indigoPlugin/Contents/Packages/
