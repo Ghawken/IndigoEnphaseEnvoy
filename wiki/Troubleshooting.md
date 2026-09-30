@@ -125,6 +125,29 @@ If `typeEnvoy` = `"Unmetered"`, consumption data is not available — this is a 
 
 ---
 
+## Today / 7-Day Energy Equals Lifetime (Huge Values)
+
+### Symptom
+`productionWattsToday`, `production7days` and `productionwhLifetime` (and the consumption equivalents) all show the same number, in the millions of Wh.
+
+### Cause
+Envoy firmware **8.3.5433 and later** (confirmed on 8.3.5433 and D8.3.5528, rolled out to Envoy-S Metered gateways from May 2026, often silently or after a gateway reboot) sends today and past-7-days energy equal to lifetime energy in its local data feed. Home Assistant users see the same thing. It is an Enphase firmware issue, not a plugin issue, and reloading the plugin or restarting Indigo does not change what the Envoy sends.
+
+### Fix (plugin 1.8.1 and later)
+The plugin detects the bad values and calculates today and 7-day energy itself from the lifetime counter, which is still accurate. When this happens:
+- A warning is logged once: *"Envoy is reporting production today/7-day energy equal to lifetime... Calculating from the lifetime counter instead."*
+- `energySource` shows `calculated` instead of `envoy`.
+- **Today** counts up from the moment the plugin first saw the problem (or from midnight on later days). It resets at local midnight.
+- **7-day** is today plus the previous six days, so it takes a week to become a full rolling total.
+- The tally is stored in the `energyHistory` state and survives plugin restarts. Increments after a gap of more than 24 hours are not attributed to today.
+
+If the Envoy later sends sensible values again the plugin switches back automatically and logs that too.
+
+### Consumption also wrong (some systems, firmware 8.3.5433 and later)
+On some systems (those with a total-consumption CT setup, per the Home Assistant reports; not everyone on 8.3.5433 sees this) the Envoy also overwrites its **total-consumption** figures with the **net-consumption** figures, so `consumptionWattsNow` and `consumptionwhLifetime` come back identical to the net values (grid import/export). Plugin 1.8.1 detects this and, following the Home Assistant fix, rebuilds total consumption as net consumption + production. A warning is logged once and `energySource` shows `consumption: calculated (total = net + production)`. On the odd poll where the Envoy sends an unusable production report (it does this intermittently on 8.3.5528) the consumption states are left as they were rather than publishing net values as total.
+
+---
+
 ## Battery Device Shows Unknown / No Data
 
 ### Symptom

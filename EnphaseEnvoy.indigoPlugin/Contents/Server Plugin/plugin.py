@@ -75,6 +75,18 @@ ENVOY_DPEL_PATH = "/ivp/ss/dpel"
 PANEL_STALE_THRESHOLD_SECS = 25 * 60  # 15 minutes
 POWER_STATUS_BUFFER = 100
 
+# ── Energy today / 7-day fallback ─────────────────────────────────────────
+# Envoy firmware 8.3.5433 and later (rolled out to Envoy-S Metered units from
+# May 2026; confirmed on 8.3.5433 and D8.3.5528)
+# returns whToday and whLastSevenDays equal to whLifetime in production.json,
+# for both production and consumption.  The lifetime counter itself is still
+# good, so the plugin keeps its own per-day tally of lifetime increments and
+# publishes that instead whenever the Envoy's today/week values look wrong.
+ENERGY_HISTORY_DAYS = 7              # today + previous 6 days = rolling week
+ENERGY_MAX_INCREMENT_WH = 500000     # ignore a single-poll jump above 500 kWh (counter glitch)
+ENERGY_MAX_GAP_SECS = 24 * 3600      # after a gap this long, don't attribute the increment to today
+ENERGY_HISTORY_SAVE_SECS = 10 * 60   # how often the tally is written back to the device state
+
 
 def format_elapsed_time(seconds):
     """Format elapsed seconds into a human-readable string.
@@ -167,6 +179,9 @@ class Plugin(indigo.PluginBase):
 
         self.session_cache = defaultdict(self._new_session)
         self.force_update = set()  # dev.id values needing immediate refresh
+        self.energy_history = {}        # dev.id -> tally of daily lifetime increments (see _updateEnergyHistory)
+        self.energy_history_saved = {}  # dev.id -> monotonic time the tally was last written to the device state
+        self.energy_source = {}         # dev.id -> {'production': 'envoy'|'calculated', 'consumption': ...}
 
         #self.session = requests.Session()
         self.log_manual_expiry = True
@@ -1614,6 +1629,12 @@ class Plugin(indigo.PluginBase):
     def shutdown(self):
         if self.debugLevel >= 2:
             self.logger.debug(u"shutdown() method called.")
+        # Persist the energy tallies so nothing is lost across a restart.
+        for devId in list(self.energy_history.keys()):
+            try:
+                self._saveEnergyHistory(indigo.devices[devId], force=True)
+            except Exception:
+                self.logger.debug("Could not save energy history at shutdown", exc_info=True)
 
     def startup(self):
         if self.debugLevel >= 2:
@@ -3083,6 +3104,252 @@ class Plugin(indigo.PluginBase):
              if self.debugLevel >= 2:
                  self.errorLog(u"Saving Values errors:"+str(error))
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Energy today / 7-day: guard against bad Envoy values and calculate
+    # from the lifetime counter instead.
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _energyValuesSuspect(today, week, lifetime):
+        """
+        True when the Envoy's whToday / whLastSevenDays values cannot be right.
+
+        Firmware 8.3.5433 and later sends today and week equal to lifetime.  A brand new
+        system (installed this week) can legitimately have week == lifetime, but
+        the calculated fallback gives the right answer in that case too.
+        """
+        try:
+            today = float(today)
+            week = float(week)
+            lifetime = float(lifetime)
+        except (TypeError, ValueError):
+            return False
+        if lifetime <= 0:
+            return False
+        if today > week + 1:            # the week includes today
+            return True
+        if week > lifetime + 1:         # a week can't exceed lifetime
+            return True
+        if abs(today - lifetime) < 1 or abs(week - lifetime) < 1:
+            return True                 # the 8.3.5433+ signature
+        return False
+
+    def _loadEnergyHistory(self, dev):
+        """Return the in-memory tally for dev, loading it from the device state on first use."""
+        history = self.energy_history.get(dev.id)
+        if history is None:
+            history = {}
+            try:
+                raw = dev.states.get('energyHistory', '')
+                if raw:
+                    loaded = json.loads(raw)
+                    if isinstance(loaded, dict):
+                        history = loaded
+            except Exception:
+                self.logger.debug("Could not parse saved energyHistory state; starting fresh", exc_info=True)
+            self.energy_history[dev.id] = history
+        return history
+
+    def _saveEnergyHistory(self, dev, force=False):
+        """Write the tally to the energyHistory device state, throttled unless force=True."""
+        history = self.energy_history.get(dev.id)
+        if history is None:
+            return
+        now = time.monotonic()
+        last = self.energy_history_saved.get(dev.id)
+        if force or last is None or now - last >= ENERGY_HISTORY_SAVE_SECS:
+            dev.updateStateOnServer('energyHistory', value=json.dumps(history, sort_keys=True))
+            self.energy_history_saved[dev.id] = now
+
+    def _updateEnergyHistory(self, dev, kind, lifetime):
+        """
+        Feed one lifetime reading (Wh) for `kind` ('production' or 'consumption')
+        into the per-day tally and return {'today': Wh, 'week': Wh, 'days': n}.
+
+        Only positive increments of the lifetime counter are counted, so a
+        counter step-down (the 32-bit per-inverter overflow that drops lifetime
+        by ~1.193 MWh) is simply ignored rather than producing negative or wild
+        values.  The week figure is today plus the previous six days.
+        """
+        if lifetime is None:
+            return None
+        try:
+            lifetime = float(lifetime)
+        except (TypeError, ValueError):
+            return None
+
+        today_date = datetime.date.today()
+        today_str = today_date.isoformat()
+        history = self._loadEnergyHistory(dev)
+        entry = history.get(kind) or {}
+        days = entry.get('days') or {}
+        last = entry.get('last')
+        last_seen = entry.get('last_seen', 0)
+        now_epoch = time.time()
+
+        if last is not None:
+            inc = lifetime - float(last)
+            if inc <= 0:
+                pass  # no change, or counter stepped down: nothing to add
+            elif inc > ENERGY_MAX_INCREMENT_WH:
+                self.logger.debug(f"[{dev.name}] {kind} lifetime jumped {inc:.0f} Wh in one poll; ignoring as a glitch")
+            elif last_seen and now_epoch - float(last_seen) > ENERGY_MAX_GAP_SECS:
+                self.logger.debug(f"[{dev.name}] {kind} lifetime gap of {now_epoch - float(last_seen):.0f}s; not attributing {inc:.0f} Wh to today")
+            else:
+                days[today_str] = days.get(today_str, 0.0) + inc
+        days.setdefault(today_str, 0.0)
+
+        cutoff = (today_date - datetime.timedelta(days=ENERGY_HISTORY_DAYS - 1)).isoformat()
+        days = {d: round(v, 3) for d, v in days.items() if d >= cutoff}
+
+        entry['days'] = days
+        entry['last'] = lifetime
+        entry['last_seen'] = int(now_epoch)
+        history[kind] = entry
+        self._saveEnergyHistory(dev)
+
+        return {
+            'today': int(days[today_str]),
+            'week': int(sum(days.values())),
+            'days': len(days),
+        }
+
+    def _repairTotalConsumption(self, dev, data):
+        """
+        Work around Envoy firmware 8.3.5433+ overwriting the total-consumption entry
+        of production.json with the net-consumption values (wNow and whLifetime come
+        back identical in consumption[0] and consumption[1]).
+
+        Follows the Home Assistant / pyenphase repair: total = net + production.
+        Returns a corrected copy of consumption[0] to use in place of the original.
+        Returns None when the signature is present but the production eim report is
+        unusable (activeCount 0, which 8.3.5528 sends intermittently), meaning the
+        total cannot be repaired this poll and raw net values must not be published
+        as total consumption.
+        """
+        consumption = data.get('consumption') or []
+        if not consumption:
+            return None
+        total = dict(consumption[0])
+        if len(consumption) < 2:
+            return total
+        net = consumption[1]
+
+        try:
+            same = (float(total.get('whLifetime')) == float(net.get('whLifetime'))
+                    and float(total.get('wNow')) == float(net.get('wNow')))
+        except (TypeError, ValueError):
+            return total
+
+        sources = self.energy_source.setdefault(dev.id, {})
+        if not same:
+            if sources.get('_consumption_repair'):
+                sources['_consumption_repair'] = False
+                self.logger.info(f"[{dev.name}] Envoy total-consumption values look distinct from net-consumption again; no repair needed.")
+            return total
+
+        production = data.get('production') or []
+        eim = production[1] if len(production) > 1 else None
+        if not eim or not eim.get('activeCount'):
+            if self.debugLevel >= 2:
+                self.logger.debug(f"[{dev.name}] total-consumption equals net-consumption but production eim report is unusable; cannot repair")
+            return None
+
+        try:
+            total['wNow'] = float(total['wNow']) + float(eim.get('wNow', 0))
+            total['whLifetime'] = float(total['whLifetime']) + float(eim.get('whLifetime', 0))
+        except (TypeError, ValueError):
+            return None
+        # The today / 7-day fields are net figures on this firmware (and equal to
+        # lifetime on 8.3.5528). Mark them as unusable so _applyEnergyValues uses the
+        # plugin's own tally, which is fed from the repaired lifetime value.
+        total['whToday'] = total['whLifetime']
+        total['whLastSevenDays'] = total['whLifetime']
+
+        if not sources.get('_consumption_repair'):
+            sources['_consumption_repair'] = True
+            self.logger.warning(
+                f"[{dev.name}] Envoy is reporting total-consumption identical to net-consumption "
+                f"(Envoy firmware 8.3.5433 and later). Correcting total consumption as "
+                f"net-consumption + production, as Home Assistant does. "
+                f"Now={int(total['wNow'])} W, lifetime={int(total['whLifetime'])} Wh."
+            )
+        return total
+
+    def _applyEnergyValues(self, dev, kind, section):
+        """
+        Publish today / 7-day / lifetime energy states for `kind` from one
+        production.json section (production[1] or consumption[0]).
+
+        The lifetime tally is always kept up to date so that history already
+        exists when the Envoy starts sending bad today/week values.  If those
+        values pass the guard they are published as-is; otherwise the tally is
+        published instead and the energySource state says so.
+        """
+        state_today = f'{kind}WattsToday'
+        state_week = f'{kind}7days'
+        state_life = f'{kind}whLifetime'
+
+        # Firmware 8.3.5528 intermittently returns a bogus eim report with activeCount 0
+        # (pyenphase rejects these too). Don't let it poison the tally or the states.
+        if section.get('type') == 'eim' and section.get('activeCount') == 0:
+            if self.debugLevel >= 2:
+                self.logger.debug(f"[{dev.name}] {kind} eim report has activeCount 0; skipping energy update this poll")
+            return
+
+        lifetime = section.get('whLifetime')
+        today = section.get('whToday')
+        week = section.get('whLastSevenDays')
+
+        updates = []
+        if lifetime is not None:
+            updates.append({'key': state_life, 'value': int(float(lifetime))})
+
+        calc = self._updateEnergyHistory(dev, kind, lifetime)
+        suspect = self._energyValuesSuspect(today, week, lifetime)
+
+        if suspect and calc is not None:
+            source = 'calculated'
+            updates.append({'key': state_today, 'value': calc['today']})
+            updates.append({'key': state_week, 'value': calc['week']})
+        else:
+            source = 'envoy'
+            if today is not None:
+                updates.append({'key': state_today, 'value': int(float(today))})
+            if week is not None:
+                updates.append({'key': state_week, 'value': int(float(week))})
+
+        if updates:
+            dev.updateStatesOnServer(updates)
+
+        # Track and report which source is in use, logging only on change.
+        sources = self.energy_source.setdefault(dev.id, {})
+        previous = sources.get(kind)
+        if previous != source:
+            sources[kind] = source
+            if source == 'calculated':
+                self.logger.warning(
+                    f"[{dev.name}] Envoy is reporting {kind} today/7-day energy equal to lifetime "
+                    f"(Envoy firmware 8.3.5433 and later). Calculating {kind} today and 7-day energy "
+                    f"from the lifetime counter instead. Today={calc['today']} Wh, "
+                    f"7-day={calc['week']} Wh ({calc['days']} day(s) of history so far)."
+                )
+            elif previous is not None:
+                self.logger.info(f"[{dev.name}] Envoy {kind} today/7-day energy values look valid again; using Envoy values.")
+        elif self.debugLevel >= 2 and source == 'calculated':
+            self.logger.debug(f"[{dev.name}] {kind} energy (calculated): today={calc['today']} Wh week={calc['week']} Wh")
+
+        combined = []
+        for k, v in sorted(sources.items()):
+            if k.startswith('_'):
+                continue
+            if k == 'consumption' and sources.get('_consumption_repair'):
+                v = f"{v} (total = net + production)"
+            combined.append(f"{k}: {v}")
+        combined = ", ".join(combined)
+        if dev.states.get('energySource') != combined:
+            dev.updateStateOnServer('energySource', value=combined)
+
     def setproductionMax(self, device, currentproduction):
         try:
             maxwattsinDeviceToday = int(device.states['productionWattsMaxToday'])
@@ -3161,9 +3428,7 @@ class Plugin(indigo.PluginBase):
                 if len(data['production']) > 1:
                     dev.updateStateOnServer('productionWattsNow', value=int(data['production'][1]['wNow']))
                     productionWatts = int(data['production'][1]['wNow'])
-                    dev.updateStateOnServer('production7days', value=int(data['production'][1]['whLastSevenDays']))
-                    dev.updateStateOnServer('productionWattsToday', value=int(data['production'][1]['whToday']))
-                    dev.updateStateOnServer('productionwhLifetime', value=int(data['production'][1]['whLifetime']))
+                    self._applyEnergyValues(dev, 'production', data['production'][1])
                 else:
                     if self.debugLevel >= 2:
                         self.logger.debug(u"no Production 2 result found.")
@@ -3187,12 +3452,17 @@ class Plugin(indigo.PluginBase):
                     productionWatts = int(data["production"][0]["wNow"])
 
             if envoyType == "Metered":
-                if "consumption" in data:
-                    dev.updateStateOnServer('consumptionWattsNow', value=int(data['consumption'][0]['wNow']))
-                    consumptionWatts = int(data['consumption'][0]['wNow'])
-                    dev.updateStateOnServer('consumption7days', value=int(data['consumption'][0]['whLastSevenDays']))
-                    dev.updateStateOnServer('consumptionwhLifetime',  value=int(data['consumption'][0]['whLifetime']))
-                    dev.updateStateOnServer('consumptionWattsToday', value=int(data['consumption'][0]['whToday']))
+                totalConsumption = self._repairTotalConsumption(dev, data) if "consumption" in data else None
+                if "consumption" in data and totalConsumption is None:
+                    # Total-consumption is net-consumption on this firmware and production
+                    # is unusable this poll, so nothing trustworthy to publish. Leave the
+                    # consumption states as they were (see _repairTotalConsumption).
+                    if self.debugLevel >= 2:
+                        self.logger.debug(u"Consumption skipped this poll: cannot repair total-consumption.")
+                elif "consumption" in data:
+                    dev.updateStateOnServer('consumptionWattsNow', value=int(totalConsumption['wNow']))
+                    consumptionWatts = int(totalConsumption['wNow'])
+                    self._applyEnergyValues(dev, 'consumption', totalConsumption)
                     if len(data['consumption'])>1:
                         netConsumption = int(data['consumption'][1]['wNow'])
                         dev.updateStateOnServer('netConsumptionWattsNow', value=netConsumption)

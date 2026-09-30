@@ -273,6 +273,16 @@
         <TriggerLabel>Net consumption Watt Hours Lifetime</TriggerLabel>
         <ControlPageLabel>Net consumption Watt Hours Lifetime</ControlPageLabel>
       </State>
+      <State id="energySource">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Energy Today/7-day Source (envoy or calculated)</TriggerLabel>
+        <ControlPageLabel>Energy Today/7-day Source (envoy or calculated)</ControlPageLabel>
+      </State>
+      <State id="energyHistory">
+        <ValueType>String</ValueType>
+        <TriggerLabel>Energy Lifetime Tally (internal)</TriggerLabel>
+        <ControlPageLabel>Energy Lifetime Tally (internal)</ControlPageLabel>
+      </State>
       <State id="storageActiveCount">
         <ValueType>Number</ValueType>
         <TriggerLabel>Storage Number Active</TriggerLabel>

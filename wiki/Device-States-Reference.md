@@ -49,6 +49,8 @@ The screenshot below shows all states from a live Envoy-S Metered with an instal
 | `consumption7days` | Number | Energy consumed last 7 days (Wh) |
 | `consumptionwhLifetime` | Number | Lifetime energy consumed (Wh) |
 | `netconsumptionwhLifetime` | Number | Lifetime net consumption (Wh) |
+| `energySource` | String | Where today/7-day energy comes from: `envoy` (values as sent by the Envoy) or `calculated` (plugin tally from the lifetime counter, used when the Envoy sends today/week equal to lifetime, as firmware 8.3.5433 and later does). Adds `(total = net + production)` when total consumption is being rebuilt from net + production (firmware 8.3.5433+) |
+| `energyHistory` | String | Internal JSON tally of daily lifetime increments used for the calculated values. Not for display. |
 
 ### Inverter Summary
 
